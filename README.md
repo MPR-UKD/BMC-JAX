@@ -1,69 +1,162 @@
 # BMC-JAX
 
-Differentiable Bloch-McConnell simulation and CEST parameter fitting in JAX.
+Differentiable Bloch–McConnell simulation and quantitative CEST fitting, in JAX.
+
+Simulate a Z-spectrum from a pool model, and fit exchange rates and pool sizes back out of
+measured data — on GPU, with exact Jacobians from automatic differentiation rather than finite
+differences.
+
+```bash
+pip install -e .
+```
+
+## Quickstart
 
 ```python
-from bmc_jax.jax_solver.simulator import simulate_spectrum
-from bmc_jax.fitting import FitSpec, Slot, fit_phantom_lm
+import numpy as np
+from bmc_jax.io import example_config
+from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
+from bmc_jax.fitting import FitSpec, Slot, Problem, fit
+
+params = example_config("amide")          # or from_yaml("your_model.yaml")
+jp  = convert_params(params)
+m0  = get_initial_magnetization(jp)
+ppm = np.linspace(-6, 6, 61)
+
+# a QUESP ladder: the same pools saturated at four powers, fitted as one problem
+ladder = Problem.stack([
+    Problem(jp, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0, params.mz_loc)
+    for b in (0.5, 1.0, 2.0, 4.0)])
+
+z = np.asarray(ladder.simulate())
+
+spec = FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=5000.0, x0=300.0),
+                Slot("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0005)])
+res = fit(ladder, spec, z[None, :], n_per_block=len(ppm))
+print(res.summary())
 ```
+
+```
+sample             k             f        rms
+---------------------------------------------
+     0       49.604    0.00090781    3.00e-05      (truth: k = 50, f = 0.0009009)
+```
+
+## How it works
+
+The Bloch–McConnell system is affine, `dM/dt = A M + b`. Augmenting the state with a constant
+unity component folds `b` into the matrix, so a time step is **one matrix exponential and never a
+matrix inversion**:
+
+```
+[ M ]'     [ A  b ] [ M ]
+[ 1 ]   =  [ 0  0 ] [ 1 ]
+```
+
+Two levels of parallelism carry the cost: `jax.vmap` runs every saturation offset at once, and
+`jax.lax.scan` compiles the time evolution within each offset into a single XLA loop.
+
+Because the whole forward model is JAX, the derivative of a Z-spectrum with respect to any
+physical parameter comes from autodiff. That is what makes gradient-based fitting and
+Cramér–Rao bounds cheap, and it is the difference from a simulator you can only evaluate.
 
 ## Install
 
 ```bash
-pip install -e .                 # core: jax + numpy
-pip install -e ".[pulseq]"       # + reading/writing .seq
-pip install -e ".[reference]"    # + bmctool, for YAML configs and CPU cross-validation
+pip install -e .                 # core: jax + numpy only
+pip install -e ".[pulseq]"       # + pypulseq, to read and write .seq
+pip install -e ".[reference]"    # + bmctool, for cross-validation against the CPU reference
+pip install -e ".[dev]"          # + pytest
 ```
 
-The core deliberately depends on **jax and numpy only**. Anything that reads a file format, or
-validates against another implementation, is an optional extra -- so an install can never fail
-on a dependency the simulator itself does not use.
+The core depends on **jax and numpy and nothing else**. Everything that reads a file format, or
+validates against another implementation, is an optional extra, so an install cannot fail on a
+dependency the simulator does not use.
 
-## Status
+## What is in it
 
-v0.1.0 is the solver and the fitting front-end lifted out of the DLQCest research tree, with
-imports made package-relative and nothing else changed. It is byte-equivalent to the copy that
-produced the phantom results, and that equivalence is the gate every later change has to pass:
-see `tests/test_equivalence.py`.
+```
+bmc_jax/
+├── jax_solver/      the forward model
+│   ├── matrix.py            the BMC matrix and one time step
+│   ├── simulator.py         scan over time, vmap over offsets
+│   ├── voxel_simulator.py   batched over voxels, with per-voxel parameters
+│   ├── param_adapter.py     pools -> the static array layout JIT needs
+│   ├── seq_adapter.py       read a Pulseq .seq
+│   ├── sequences.py         or build one in code, with no file at all
+│   └── sharded.py           spread a batch across every local GPU
+├── fitting/
+│   ├── problem.py           what is simulated       (Problem, Problem.stack)
+│   ├── spec.py              which parameters are free (FitSpec, Slot)
+│   ├── residual.py          what is compared
+│   ├── optimize.py          bounded Levenberg–Marquardt, usable on its own
+│   ├── batching.py          one spectrum, many voxels, or many GPUs
+│   └── result.py            FitResult: values, residual per rung, bounds hit
+└── io/                      Pulseq-CEST YAML, as plain frozen dataclasses
+```
 
-The layout is being reorganised in steps, each one gated on that test:
+Nothing about any particular agent is hardcoded. A `FitSpec` names fields and pool indices;
+which pools exist and what they are called belongs to the model, not to the fitter.
 
-| step | change | state |
-|------|--------|-------|
-| 1 | `solver.py` -> `matrix.py` (it builds the BMC matrix; it is not a fitter), plus `sequences.py` so a sequence can be built in code | done |
-| 2 | `fitting.py` -> a package: `spec / residual / optimize / batching` | done |
-| 3 | optimiser and batching become arguments rather than four separate entry points | |
-| 4 | `Problem.stack()` for multi-experiment ladders (QUESP over B1, QUEST over saturation time) | |
-| 5 | native config dataclasses, so bmctool is optional rather than the only way in | |
+`optimize.py` does not import the solver, so `lm_minimize` is a general bounded least-squares
+routine you can use for anything. That boundary is enforced by a test, not by convention.
 
-`jax_solver/` keeps its name. Renaming it to `solvers/` was only ever justified by bmctool's CPU
-solver sitting beside it; with a native package there is one solver, and keeping the name means
-the research tree migrates by deleting a `sys.path` line rather than a repo-wide rename.
+## Tutorials
 
-Old names stay exported at every step until the last one.
+Seven scripts in [`examples/`](examples/), each runnable on its own with no data files:
+
+| | |
+|---|---|
+| `01_pools.py` | build water, CEST and MT pools in code and from YAML |
+| `02_simulate.py` | pools to Z-spectrum; why MTRasym is not a clean per-pool measure |
+| `03_seq_file.py` | write a real `.seq`, read it back, simulate it |
+| `04_fit_one.py` | fit k and f from one saturation level — and find where that quietly fails |
+| `05_fit_ladder.py` | the QUESP ladder |
+| `06_quest.py` | the saturation-time ladder, and QUESP vs QUEST as a cross-check |
+| `07_many_voxels.py` | a slice, with per-voxel calibration held fixed |
+
+## Two things worth knowing before you trust a number
+
+**A `k` from one saturation level may not be a measurement of `k`.** Saturation efficiency is
+`alpha = w1² / (w1² + k(k + R2s))`, and it is the lever the fit uses to separate an exchange rate
+from a pool size. Where `alpha` is near 1 the pool is already saturated and raising `k` changes
+nothing; where it is near 0 almost nothing is saturated. Either way the lever is short and noise
+fills the gap. On otherwise identical data with 0.2 % noise, the same fit is 3 % wrong at
+`k = 500 Hz` and 104 % wrong at `k = 50 Hz` — converged, no bounds hit, healthy residual, both
+times. `04_fit_one.py` reproduces this; `05_fit_ladder.py` shows what a ladder recovers and what
+it does not.
+
+**float32 fitting is reproducible to about a percent.** Changing the batch size changes the
+kernel XLA compiles, float32 reductions are not associative, and a k/f fit is close enough to
+singular that a ~1e-7 difference in the Jacobian moves the result by ~1 % in `k`. Measured: 1.1e-2
+relative between one shot and `max_chunk=32`, against 1.8e-7 in float64. That is well below the
+error noise imposes — on 0.2 % noise, float32 and float64 land 2.147 % and 2.054 % from truth —
+so fit in float32 and re-check anything that turns on a smaller difference with
+`bmc_jax.precision.configure_x64(True)`.
 
 ## Tests
 
 ```bash
-pytest                                    # 61 tests + 8 docstring examples
-
-DLQCEST_ROOT=/path/to/research/tree pytest   # also runs the two migration gates
+pytest                    # 69 tests, plus the docstring examples
 ```
 
-| file | what it checks | needs |
-|------|----------------|-------|
-| `test_solver.py` | physics invariants of the forward model | nothing |
-| `test_config.py` | reading a Pulseq-CEST config | nothing |
-| `test_fitting.py` | simulate, then fit the parameters back | nothing |
-| `test_structure.py` | the package's own layering rules | nothing |
-| `test_config_vs_bmctool.py` | agreement with the reference reader | `DLQCEST_ROOT` |
-| `test_equivalence_solver.py` | bit-identity with the research copy | `DLQCEST_ROOT` (temporary) |
+| | checks |
+|---|---|
+| `test_solver.py` | physics invariants of the forward model |
+| `test_problem.py` | stacking experiments, and the padding that makes it safe |
+| `test_fitting.py` | simulate, then fit the parameters back |
+| `test_config.py` | reading a Pulseq-CEST config |
+| `test_structure.py` | the package's own layering rules |
 
-The last two skip unless `DLQCEST_ROOT` points at the tree this package was lifted from.
-They exist to prove the move changed nothing and are deleted once it is finished.
+`test_solver.py` asserts what is true of *any* correct Bloch–McConnell implementation — the far
+wing returns to 1, a pool-free spectrum is even in ppm, a pool at `+dw` dips only on its own side,
+`k = 0` transfers no label, saturation deepens with both power and time, and the dip stays at the
+same ppm at 1.5, 2.9 and 7 T. A stored reference spectrum would only check that the code still
+does what it did; these check that what it does is right, and they need no data files.
 
-`test_solver.py` asserts things that are true of any correct Bloch-McConnell implementation --
-the far wing returns to 1, a pool-free spectrum is even in ppm, a pool at +dw dips only on its
-own side, k = 0 transfers no label, saturation deepens with both B1 and time, and the dip stays
-at the same ppm at 1.5 / 2.9 / 7 T. A stored golden spectrum would test only that the code still
-does what it did; these test that what it does is right, and they need no data files.
+Docstring examples run as tests, so an example that stops being true fails the build rather than
+misleading the next reader.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
