@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bmc-jax"
+version = "0.1.0"
+description = "Differentiable Bloch-McConnell simulation and CEST parameter fitting in JAX"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+# The core is jax + numpy and nothing else. Everything that reads a file format or
+# validates against another implementation is optional, so `pip install bmc-jax` can
+# never fail on a dependency the simulator does not use.
+dependencies = ["numpy", "jax>=0.6"]
+
+[project.optional-dependencies]
+pulseq    = ["pypulseq"]          # reading and writing .seq
+reference = ["bmctool"]           # YAML configs + the CPU solver used for cross-validation
+dev       = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
