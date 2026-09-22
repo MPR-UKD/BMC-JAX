@@ -1,0 +1,13 @@
+# Water + amide + NOE + a semi-solid MT pool with a SuperLorentzian lineshape.
+# A Lorentzian at T2 = 10 us is flat across +-5 ppm and degenerate with the signal
+# scale; the SuperLorentzian carries shape over the same window. The choice matters.
+water_pool: { f: 1.0, t1: 1.3, t2: 0.05 }
+cest_pool:
+  amide: { f: 0.0009009, t1: 1.0, t2: 0.1, k: 50, dw: 3.5 }
+  noe:   { f: 0.0045,    t1: 1.3, t2: 0.005, k: 20, dw: -3.0 }
+mt_pool: { f: 0.05, t1: 1.0, t2: 1.0e-05, k: 30, dw: -2.5, lineshape: SuperLorentzian }
+b0: 3
+gamma: 267.5153
+b0_inhom: 0.0
+rel_b1: 1.0
+max_pulse_samples: 200

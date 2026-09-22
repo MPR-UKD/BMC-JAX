@@ -1,0 +1,10 @@
+# Water + one amide CEST pool at 3.5 ppm. 3 T.
+# The simplest config that produces a CEST effect -- start here.
+water_pool: { f: 1.0, t1: 1.3, t2: 0.05 }
+cest_pool:
+  amide: { f: 0.0009009, t1: 1.0, t2: 0.1, k: 50, dw: 3.5 }
+b0: 3
+gamma: 267.5153
+b0_inhom: 0.0
+rel_b1: 1.0
+max_pulse_samples: 200

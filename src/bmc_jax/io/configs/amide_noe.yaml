@@ -1,0 +1,11 @@
+# Water + amide (+3.5 ppm) + NOE (-3.0 ppm), no MT.
+# Two pools on opposite sides of water: what MTRasym cannot separate.
+water_pool: { f: 1.0, t1: 1.3, t2: 0.05 }
+cest_pool:
+  amide: { f: 0.0009009, t1: 1.0, t2: 0.1, k: 50, dw: 3.5 }
+  noe:   { f: 0.0045,    t1: 1.3, t2: 0.005, k: 20, dw: -3.0 }
+b0: 3
+gamma: 267.5153
+b0_inhom: 0.0
+rel_b1: 1.0
+max_pulse_samples: 200
