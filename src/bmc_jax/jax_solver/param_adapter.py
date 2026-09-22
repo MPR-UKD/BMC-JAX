@@ -1,9 +1,16 @@
-"""
-Parameter adapter for JAX-based BMC simulation.
+"""Physical pools and scanner settings -> the static array layout JIT needs.
 
-This module provides the JAXParams container and conversion utilities to transform
-standard BMCTool parameters into JAX-compatible arrays.
+EVERY PHYSICAL PARAMETER IS FORCED TO FLOAT. Configs routinely write `k: 50` rather than
+`k: 50.0`, and an integer reaching the solver becomes an integer array whose derivative is zero:
+the parameter then cannot be fitted, and nothing says so -- the optimiser simply reports the
+starting value back. Only the genuinely discrete fields (mt_lineshape, use_pulse_frame) stay
+integer.
+
+`convert_params` is duck-typed on purpose. It reads attributes and never checks a class, so any
+object exposing water_pool, cest_pools, mt_pool, system and options works: bmc_jax.io's
+dataclasses, a bmctool Parameters, or something of your own.
 """
+
 
 from typing import NamedTuple, Optional, Any
 import jax.numpy as jnp
@@ -61,9 +68,9 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
     """
     
     # --- Water Pool ---
-    water_r1 = jnp.array(params.water_pool.r1)
-    water_r2 = jnp.array(params.water_pool.r2)
-    water_f = jnp.array(params.water_pool.f)
+    water_r1 = jnp.asarray(params.water_pool.r1, dtype=float)
+    water_r2 = jnp.asarray(params.water_pool.r2, dtype=float)
+    water_f = jnp.asarray(params.water_pool.f, dtype=float)
 
     # --- CEST Pools ---
     num_pools = len(params.cest_pools)
@@ -89,19 +96,19 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
         r1_list += [0.0] * padding
         r2_list += [0.0] * padding
 
-    cest_k = jnp.array(k_list)
-    cest_f = jnp.array(f_list)
-    cest_dw = jnp.array(dw_list)
-    cest_r1 = jnp.array(r1_list)
-    cest_r2 = jnp.array(r2_list)
+    cest_k = jnp.asarray(k_list, dtype=float)
+    cest_f = jnp.asarray(f_list, dtype=float)
+    cest_dw = jnp.asarray(dw_list, dtype=float)
+    cest_r1 = jnp.asarray(r1_list, dtype=float)
+    cest_r2 = jnp.asarray(r2_list, dtype=float)
 
     # --- MT Pool ---
     if params.mt_pool is not None:
-        mt_k = jnp.array(params.mt_pool.k)
-        mt_f = jnp.array(params.mt_pool.f)
-        mt_dw = jnp.array(params.mt_pool.dw)
-        mt_r1 = jnp.array(params.mt_pool.r1)
-        mt_r2 = jnp.array(params.mt_pool.r2)
+        mt_k = jnp.asarray(params.mt_pool.k, dtype=float)
+        mt_f = jnp.asarray(params.mt_pool.f, dtype=float)
+        mt_dw = jnp.asarray(params.mt_pool.dw, dtype=float)
+        mt_r1 = jnp.asarray(params.mt_pool.r1, dtype=float)
+        mt_r2 = jnp.asarray(params.mt_pool.r2, dtype=float)
         
         ls_str = params.mt_pool.lineshape.lower()
         if ls_str == 'lorentzian':
@@ -121,10 +128,10 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
         mt_lineshape = jnp.array(0)
 
     # --- System ---
-    b0 = jnp.array(params.system.b0)
-    gamma = jnp.array(params.system.gamma)
-    b0_inhom = jnp.array(params.system.b0_inhom)
-    rel_b1 = jnp.array(params.system.rel_b1)
+    b0 = jnp.asarray(params.system.b0, dtype=float)
+    gamma = jnp.asarray(params.system.gamma, dtype=float)
+    b0_inhom = jnp.asarray(params.system.b0_inhom, dtype=float)
+    rel_b1 = jnp.asarray(params.system.rel_b1, dtype=float)
     
     # --- Options ---
     # Sequence evaluation threshold logic

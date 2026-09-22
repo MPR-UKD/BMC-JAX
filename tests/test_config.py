@@ -132,3 +132,27 @@ def test_mz_loc_matches_the_simulator(name):
                                      return_full_trajectory=False))[0]
     assert m[p.mz_loc] == pytest.approx(p.water_pool.f, abs=1e-3), (
         f"index {p.mz_loc} holds {m[p.mz_loc]:.4f}, not water Mz ({p.water_pool.f})")
+
+
+def test_integer_config_values_become_float_parameters():
+    """A config written `k: 50` must not produce an integer parameter array.
+
+    An integer array has zero derivative, so a parameter built from one cannot be fitted -- the
+    optimiser reports the starting value back and nothing says anything is wrong. Pulseq-CEST's
+    own reference configs write `k: 50`, so this is the normal case, not a corner one. Only
+    mt_lineshape and use_pulse_frame are genuinely discrete and stay integer.
+    """
+    from bmc_jax.jax_solver import convert_params
+    discrete = {"mt_lineshape", "use_pulse_frame"}
+    for name in ALL:
+        jp = convert_params(example_config(name))
+        ints = [f for f, v in zip(jp._fields, jp)
+                if f not in discrete and np.asarray(v).dtype.kind != "f"]
+        assert ints == [], f"{name}: non-float physical parameters {ints}"
+
+
+def test_a_pool_built_from_python_ints_is_also_float():
+    """The coercion is in the dataclass too, not only in the adapter."""
+    from bmc_jax.io import CESTPool
+    pool = CESTPool(f=1, t1=1, t2=1, k=50, dw=3)
+    assert all(isinstance(v, float) for v in (pool.f, pool.k, pool.dw, pool.r1, pool.r2))

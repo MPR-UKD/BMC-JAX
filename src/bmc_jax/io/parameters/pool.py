@@ -88,6 +88,7 @@ class Pool:
         object.__setattr__(self, "r1", rate_from(self.r1, t1, "r"))
         object.__setattr__(self, "r2", rate_from(self.r2, t2, "r"))
         object.__setattr__(self, "dw", float(self.dw))
+        object.__setattr__(self, "f", float(self.f))
         if not 0.0 <= self.f <= 1.0:
             raise ValueError(f"pool fraction f must be in [0, 1], got {self.f}")
 

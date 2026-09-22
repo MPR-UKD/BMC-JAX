@@ -34,13 +34,19 @@ class CESTPool(Pool):
     --------
     >>> p = CESTPool(f=0.0009, t1=1.0, t2=0.1, k=50, dw=3.5)
     >>> p.k, p.dw
-    (50, 3.5)
+    (50.0, 3.5)
     """
 
     k: float = 0.0
 
     def __post_init__(self, t1, t2):
-        """Validate `k` after the inherited checks."""
+        """Coerce `k` to float and validate it, after the inherited checks.
+
+        The coercion matters more than it looks. Configs routinely write ``k: 50`` rather than
+        ``k: 50.0``, and an integer that reaches the solver becomes an integer array, whose
+        derivative is zero -- the parameter then cannot be fitted, silently.
+        """
         super().__post_init__(t1, t2)
+        object.__setattr__(self, "k", float(self.k))
         if self.k < 0:
             raise ValueError(f"exchange rate k must be >= 0, got {self.k}")
