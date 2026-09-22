@@ -19,7 +19,16 @@ SRC = Path(__file__).parents[1] / "src" / "bmc_jax"
 #: downward, so the graph is a DAG and there is a bottom to start reading at.
 ALLOWED = {
     "precision":        set(),
-    "io.config":        set(),
+    "io.config":              {"io.parameters"},
+    "io.parameters.pool":     set(),
+    "io.parameters.water_pool":  {"io.parameters.pool"},
+    "io.parameters.cest_pool":   {"io.parameters.pool"},
+    "io.parameters.mt_pool":     {"io.parameters.cest_pool"},
+    "io.parameters.system":   set(),
+    "io.parameters.options":  set(),
+    "io.parameters.parameters": {"io.parameters.cest_pool", "io.parameters.mt_pool",
+                                 "io.parameters.options", "io.parameters.system",
+                                 "io.parameters.water_pool"},
     "fitting.spec":     {"jax_solver"},
     "fitting.optimize": set(),                                   # <- the important one
     "fitting.residual": {"jax_solver", "fitting.spec"},
@@ -101,6 +110,26 @@ def test_every_exported_name_exists():
     for mod in (F, IO, S):
         missing = [n for n in mod.__all__ if not hasattr(mod, n)]
         assert missing == [], f"{mod.__name__}.__all__ promises {missing}, which do not exist"
+
+
+def test_parameter_objects_are_immutable():
+    """Validation runs once, at construction. Freezing is what makes once enough.
+
+    Without it, `pool.f = 2.0` after construction would silently succeed and the object would be
+    in a state nothing ever checked. bmctool buys the same guarantee with a property setter per
+    field; this costs one word per class.
+    """
+    from dataclasses import FrozenInstanceError, replace
+    from bmc_jax.io import example_config
+    p = example_config("amide")
+    for obj, attr in ((p.water_pool, "f"), (p.cest_pools[0], "k"), (p.system, "b0"),
+                      (p.options, "scale"), (p, "mt_pool")):
+        with pytest.raises(FrozenInstanceError):
+            setattr(obj, attr, 0.5)
+    # and building a variant re-runs every check
+    assert replace(p.cest_pools[0], k=200.0).k == 200.0
+    with pytest.raises(ValueError):
+        replace(p.cest_pools[0], k=-1.0)
 
 
 def test_the_old_names_still_work():
