@@ -2,7 +2,7 @@
 
 WHY THIS TEST EXISTS
   This package was lifted out of a research tree in which five copies of the same solver had
-  drifted apart -- one of them, the copy CLAUDE.md names as canonical, still hardcodes
+  drifted apart -- one of them, the copy that tree documented as canonical, still hardcodes
   `dtype=jnp.float64` in get_initial_magnetization where the others honour the run's precision.
   A reorganisation that silently changes a number is worse than no reorganisation, because every
   result already quoted from the old copy would need re-deriving without anyone knowing.
@@ -26,13 +26,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-DLQ = Path(os.environ.get("DLQCEST_ROOT", "/home/gizmoo/DLQCest"))
-EVAL = DLQ / "GPU_fitting" / "evaluation"
-REF = DLQ / "GPU_fitting" / "fitting_app" / "cesty" / "BMC_JAX"
+DLQ = Path(os.environ["DLQCEST_ROOT"]) if os.environ.get("DLQCEST_ROOT") else None
+EVAL = DLQ / "GPU_fitting" / "evaluation" if DLQ else None
+REF = DLQ / "GPU_fitting" / "fitting_app" / "cesty" / "BMC_JAX" if DLQ else None
 
 pytestmark = pytest.mark.skipif(
-    not (REF / "jax_solver" / "simulator.py").exists(),
-    reason=f"reference tree not found at {REF}; set DLQCEST_ROOT")
+    REF is None or not (REF / "jax_solver" / "simulator.py").exists(),
+    reason="set DLQCEST_ROOT to the research tree to run the migration gate")
 
 
 def test_spectrum_is_bit_identical():

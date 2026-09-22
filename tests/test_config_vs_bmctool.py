@@ -11,6 +11,7 @@ branches a thousand times.
 Skipped when bmctool is not installed. A skip is not a pass.
 """
 import glob
+import os
 from pathlib import Path
 
 import numpy as np
@@ -21,8 +22,12 @@ for _mod, _attr in (("bmctool.parameters.Parameters", "Parameters"),
                     ("cesty.BMC_JAX.bmctool.parameters.Parameters", "Parameters")):
     try:
         import importlib, sys
-        if "cesty" in _mod and "/home/gizmoo/DLQCest" not in sys.path:
-            sys.path.insert(0, "/home/gizmoo/DLQCest")
+        root = os.environ.get("DLQCEST_ROOT")
+        if "cesty" in _mod:
+            if not root:
+                continue
+            if root not in sys.path:
+                sys.path.insert(0, root)
         bmctool_Parameters = getattr(importlib.import_module(_mod), _attr)
         break
     except Exception:
@@ -31,7 +36,8 @@ for _mod, _attr in (("bmctool.parameters.Parameters", "Parameters"),
 pytestmark = pytest.mark.skipif(bmctool_Parameters is None, reason="bmctool not importable")
 
 SHIPPED = sorted(str(p) for p in (Path(__file__).parents[1] / "src/bmc_jax/io/configs").glob("*.yaml"))
-RESEARCH = sorted(glob.glob("/home/gizmoo/DLQCest/cesty/BMC_JAX/data/Sim_cases/case_*/case_*_model.yaml"))[:6]
+_root = os.environ.get("DLQCEST_ROOT", "")
+RESEARCH = sorted(glob.glob(f"{_root}/cesty/BMC_JAX/data/Sim_cases/case_*/case_*_model.yaml"))[:6] if _root else []
 
 
 @pytest.mark.parametrize("path", SHIPPED + RESEARCH, ids=lambda p: Path(p).stem)
@@ -41,7 +47,7 @@ def test_same_jaxparams_as_bmctool(path):
 
     try:
         ref = convert_params(bmctool_Parameters.from_yaml(path), max_cest_pools=8)
-    except Exception as exc:                       # noqa: BLE001
+    except Exception as exc:
         pytest.skip(f"bmctool rejects this config ({type(exc).__name__}); nothing to compare")
     ours = convert_params(from_yaml(path), max_cest_pools=8)
 

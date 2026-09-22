@@ -134,7 +134,7 @@ def test_parameter_objects_are_immutable():
 
 def test_the_old_names_still_work():
     """The split must not break a single caller. Every pre-split name is still importable."""
-    from bmc_jax.fitting import (FitSpec, Slot, apply_x, fit_phantom_adam,  # noqa: F401
+    from bmc_jax.fitting import (FitSpec, Slot, apply_x, fit_phantom_adam,
                                  fit_phantom_lm, fit_phantom_lm_sharded, fit_voxel,
                                  make_phantom_residual, make_single_residual)
     from bmc_jax.fitting import _lm_one, lm_minimize

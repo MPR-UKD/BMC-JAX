@@ -1,4 +1,4 @@
-"""WaterPool -- the free water pool."""
+"""The free water pool."""
 from dataclasses import dataclass
 
 from .pool import Pool
@@ -6,10 +6,18 @@ from .pool import Pool
 
 @dataclass(frozen=True)
 class WaterPool(Pool):
-    """Free water. It adds nothing to Pool, and that is the point.
+    """Free water, the pool everything else is measured against.
 
-    Water is the reference every other pool is measured against, so its chemical shift is 0 by
-    definition and it has no exchange rate TO anything -- the k values live on the pools that
-    exchange with it. A separate class rather than a bare Pool because `params.water_pool` being
-    a WaterPool is what makes a config self-describing.
+    It adds nothing to :class:`~bmc_jax.io.parameters.pool.Pool`, and that is the point. Water is
+    the reference, so its chemical shift is zero by definition, and it has no exchange rate of its
+    own -- exchange rates belong to the pools that exchange *with* water.
+
+    It exists as a distinct class so that a set of parameters describes itself: ``params.water_pool``
+    being a `WaterPool` says which pool is the reference without anyone having to know that it is
+    the first one in a list.
+
+    Examples
+    --------
+    >>> WaterPool(f=1.0, t1=1.3, t2=0.05).dw
+    0.0
     """
