@@ -11,3 +11,7 @@ dist/
 *.npz
 *.npy
 *.h5
+
+# tutorial output
+examples/*.png
+examples/*.seq

@@ -245,6 +245,18 @@ def fit(problem, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **kwar
     -------
     FitResult
 
+    Warnings
+    --------
+    In float32, `max_chunk` is not numerically inert. The voxels are independent and chunking is
+    the same computation in pieces, but changing the batch size changes the kernel XLA compiles,
+    float32 reductions are not associative, and a k/f fit is close enough to singular that a
+    ~1e-7 difference in the Jacobian moves the result by ~1 % in k. Measured on a 64-voxel
+    problem: 1.1e-2 relative between one shot and max_chunk=32 in float32, 1.8e-7 in float64.
+
+    So float32 fitting of an exchange rate is reproducible to about a percent, and that floor is
+    set by conditioning rather than by the data. If a conclusion turns on a smaller difference,
+    refit with :func:`bmc_jax.precision.configure_x64` enabled and check it survives.
+
     Notes
     -----
     This wraps `fit_phantom_lm`, which remains available and unchanged. The difference is that
