@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from typing import NamedTuple, Tuple
 
 from .param_adapter import JAXParams
-from .solver import build_bmc_matrix_and_vector, solve_step
+from .matrix import build_bmc_matrix_and_vector, solve_step
 
 class SimState(NamedTuple):
     """State carried through the simulation scan."""

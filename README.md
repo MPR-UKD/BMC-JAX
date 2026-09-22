@@ -28,12 +28,29 @@ see `tests/test_equivalence.py`.
 
 The layout is being reorganised in steps, each one gated on that test:
 
-| step | change |
-|------|--------|
-| 1 | `jax_solver/` -> `solvers/`, `solver.py` -> `matrix.py` (it builds the BMC matrix; it is not a fitter) |
-| 2 | `fitting.py` -> a package: `spec / problem / residual / optimize / batching / result` |
-| 3 | optimiser and batching become arguments rather than four separate entry points |
-| 4 | `Problem.stack()` for multi-experiment ladders (QUESP over B1, QUEST over saturation time) |
-| 5 | native config dataclasses, so bmctool is optional rather than the only way in |
+| step | change | state |
+|------|--------|-------|
+| 1 | `solver.py` -> `matrix.py` (it builds the BMC matrix; it is not a fitter), plus `sequences.py` so a sequence can be built in code | done |
+| 2 | `fitting.py` -> a package: `spec / problem / residual / optimize / batching / result` | |
+| 3 | optimiser and batching become arguments rather than four separate entry points | |
+| 4 | `Problem.stack()` for multi-experiment ladders (QUESP over B1, QUEST over saturation time) | |
+| 5 | native config dataclasses, so bmctool is optional rather than the only way in | |
+
+`jax_solver/` keeps its name. Renaming it to `solvers/` was only ever justified by bmctool's CPU
+solver sitting beside it; with a native package there is one solver, and keeping the name means
+the research tree migrates by deleting a `sys.path` line rather than a repo-wide rename.
 
 Old names stay exported at every step until the last one.
+
+## Tests
+
+```bash
+pytest tests/test_solver.py              # physics invariants -- needs nothing but this package
+pytest tests/test_equivalence_solver.py  # bit-identity vs the research copy; skips without it
+```
+
+`test_solver.py` asserts things that are true of any correct Bloch-McConnell implementation --
+the far wing returns to 1, a pool-free spectrum is even in ppm, a pool at +dw dips only on its
+own side, k = 0 transfers no label, saturation deepens with both B1 and time, and the dip stays
+at the same ppm at 1.5 / 2.9 / 7 T. A stored golden spectrum would test only that the code still
+does what it did; these test that what it does is right, and they need no data files.

@@ -1,8 +1,20 @@
-"""
-JAX-based Bloch-McConnell Solver.
+"""The Bloch-McConnell matrix, and one time step of it.
 
-This module provides the low-level mathematical functions to build the BMC matrix
-and solve the differential equations using matrix exponentials.
+Renamed from `solver.py`, which described nothing that is in here and had already misled the
+project documentation into calling it "gradient-based parameter fitting". There is no fitting in
+this file: it builds the system matrix and takes a single step. The fitting lives in
+`bmc_jax.fitting`.
+
+HOMOGENEOUS COORDINATES. The Bloch-McConnell system is affine, dM/dt = A M + b. Augmenting the
+state with a constant unity component folds b into the matrix, so the step is one matrix
+exponential and never a matrix inversion:
+
+    [ M ]        [ A  b ] [ M ]
+    [ 1 ]'   =   [ 0  0 ] [ 1 ]
+
+The SuperLorentzian MT lineshape is evaluated on a fixed 101-point grid of u = cos(theta) so the
+integral is a compile-time constant that XLA folds away, and |3u^2 - 1| is floored at 1e-6 to
+step over the singularity at the magic angle u = 1/sqrt(3).
 """
 
 import jax
