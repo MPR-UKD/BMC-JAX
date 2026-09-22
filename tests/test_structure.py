@@ -29,13 +29,13 @@ ALLOWED = {
     "io.parameters.parameters": {"io.parameters.cest_pool", "io.parameters.mt_pool",
                                  "io.parameters.options", "io.parameters.system",
                                  "io.parameters.water_pool"},
-    "fitting.problem":  {"jax_solver"},
+    "fitting.experiment":  {"jax_solver"},
     "fitting.spec":     {"jax_solver"},
     "fitting.optimize": set(),                                   # <- the important one
     "fitting.result":   {"fitting.spec"},
     "fitting.residual": {"jax_solver", "fitting.spec"},
     "fitting.batching": {"jax_solver", "fitting.spec", "fitting.residual",
-                         "fitting.optimize", "fitting.problem", "fitting.result"},
+                         "fitting.optimize", "fitting.experiment", "fitting.result"},
 }
 
 

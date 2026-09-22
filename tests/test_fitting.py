@@ -26,7 +26,7 @@ LADDER = (0.5, 1.0, 1.5, 2.0)          # uT -- a QUESP ladder
 K_TRUE = np.linspace(30.0, 400.0, 8)
 
 
-def _problem():
+def _experiment():
     """Eight samples differing only in exchange rate, simulated over the whole ladder.
 
     The per-level forward models are concatenated along the OFFSET axis and the measured Z the
@@ -54,7 +54,7 @@ SPEC = FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=2000.0, x0=150.0)
 
 @pytest.fixture(scope="module")
 def fitted():
-    p, base, events, M0, Z = _problem()
+    p, base, events, M0, Z = _experiment()
     X = np.asarray(fit_phantom_lm(base, events, M0, p.mz_loc, SPEC, Z,
                                   n_iter=30, skip_first=False, base_batched=True))
     return p, X

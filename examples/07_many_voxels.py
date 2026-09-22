@@ -12,7 +12,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from bmc_jax.fitting import FitSpec, Problem, Slot, fit
+from bmc_jax.fitting import FitSpec, Experiment, Slot, fit
 from bmc_jax.io import example_config
 from bmc_jax.jax_solver import (convert_params, cw_saturation, get_initial_magnetization,
                                 simulate_spectrum, tile_params)
@@ -44,8 +44,8 @@ base = base._replace(cest_k=jnp.asarray(k_true[:, None]),
                      water_r1=jnp.asarray(1.0 / t1_true))
 
 ladder_b1 = (0.5, 1.0, 2.0)
-events = Problem.stack([
-    Problem(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0),
+events = Experiment.stack([
+    Experiment(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0),
             get_initial_magnetization(jax_params), params.mz_loc)
     for b in ladder_b1]).events
 
@@ -68,7 +68,7 @@ print(f"slice: {N} voxels x {Z.shape[1]} offsets ({len(ladder_b1)} B1 rungs x {l
 fit_base = tile_params(jax_params, N)._replace(
     b0_inhom=jnp.asarray(b0_true), rel_b1=jnp.asarray(b1_true),
     water_r1=jnp.asarray(1.0 / t1_true))
-problem = Problem(fit_base, events, m0, params.mz_loc)
+problem = Experiment(fit_base, events, m0, params.mz_loc)
 
 spec = FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=300.0),
                 Slot("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0005)])
@@ -85,7 +85,7 @@ print(f"  at bounds: {int(res.at_bounds.sum())} of {res.at_bounds.size} values")
 # ---------------------------------------------------------------------------------------------
 # What happens if you ignore the calibration
 # ---------------------------------------------------------------------------------------------
-wrong = Problem(tile_params(jax_params, N), events, m0, params.mz_loc)
+wrong = Experiment(tile_params(jax_params, N), events, m0, params.mz_loc)
 res_wrong = fit(wrong, spec, Z, n_iter=40)
 err_wrong = np.abs(res_wrong["k"] / k_true - 1.0)
 print(f"\nsame data, calibration maps ignored (nominal B0/B1/T1 for every voxel):")

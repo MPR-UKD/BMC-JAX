@@ -16,7 +16,7 @@ pip install -e .
 import numpy as np
 from bmc_jax.io import example_config
 from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
-from bmc_jax.fitting import FitSpec, Slot, Problem, fit
+from bmc_jax.fitting import FitSpec, Slot, Experiment, fit
 
 params = example_config("amide")          # or from_yaml("your_model.yaml")
 jp  = convert_params(params)
@@ -24,8 +24,8 @@ m0  = get_initial_magnetization(jp)
 ppm = np.linspace(-6, 6, 61)
 
 # a QUESP ladder: the same pools saturated at four powers, fitted as one problem
-ladder = Problem.stack([
-    Problem(jp, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0, params.mz_loc)
+ladder = Experiment.stack([
+    Experiment(jp, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0, params.mz_loc)
     for b in (0.5, 1.0, 2.0, 4.0)])
 
 z = np.asarray(ladder.simulate())
@@ -86,7 +86,7 @@ bmc_jax/
 │   ├── sequences.py         or build one in code, with no file at all
 │   └── sharded.py           spread a batch across every local GPU
 ├── fitting/
-│   ├── problem.py           what is simulated       (Problem, Problem.stack)
+│   ├── problem.py           what is simulated       (Experiment, Experiment.stack)
 │   ├── spec.py              which parameters are free (FitSpec, Slot)
 │   ├── residual.py          what is compared
 │   ├── optimize.py          bounded Levenberg–Marquardt, usable on its own

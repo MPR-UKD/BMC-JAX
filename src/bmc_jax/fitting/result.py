@@ -37,7 +37,7 @@ class FitResult:
     Examples
     --------
     >>> # doctest: +SKIP
-    >>> res = fit(problem, spec, z)
+    >>> res = fit(experiment, spec, z)
     >>> res["k"]
     array([104.5, 249.2])
     >>> res.at_bounds.any()

@@ -1,14 +1,12 @@
-"""One thing to simulate: parameters, a sequence, a starting state, and where to read water.
+"""An experiment: a sample, a sequence to measure it with, and where to read the answer.
 
-A `Problem` is what the fitter compares against data. Bundling these four together removes the
-`water_z` argument that every caller previously had to compute for itself -- an index into the
-solver's state layout, which callers should not have to know.
+Bundling those together removes the `water_z` argument every caller previously had to work out
+for itself -- an index into the solver's state layout, which a caller should not have to know.
 
-`Problem.stack` is what makes multi-experiment fits ordinary. QUESP varies saturation power,
-QUEST varies saturation time, and both are the same operation: simulate several sequences with
-one set of parameters and fit against all the data at once. That is not a convenience. A single
-saturation level constrains the exchange FLUX k*f and not its two factors, so k and f are only
-identifiable across a ladder.
+`Experiment.stack` is what makes ladders ordinary. QUESP varies saturation power, QUEST varies
+saturation time, and both are the same operation: several sequences, one set of pools, fitted
+against all the data at once. That is not a convenience. A single saturation level constrains the
+exchange FLUX k*f and not its two factors, so k and f only become identifiable across a ladder.
 """
 from dataclasses import dataclass
 from typing import Sequence
@@ -80,7 +78,7 @@ def pad_events(events: SimEvent, width: int) -> SimEvent:
 
 
 @dataclass(frozen=True)
-class Problem:
+class Experiment:
     """Parameters, a sequence, a starting state, and the index of water's Mz.
 
     Attributes
@@ -97,8 +95,8 @@ class Problem:
     Examples
     --------
     >>> # doctest: +SKIP
-    >>> prob = Problem(params, events, m0, mz_loc=4)
-    >>> z = prob.simulate()
+    >>> quesp = Experiment.stack([Experiment(pools, ev, m0, mz_loc) for ev in ladder])
+    >>> z = quesp.simulate()
     """
 
     params: object
@@ -108,7 +106,7 @@ class Problem:
 
     @property
     def n_offsets(self) -> int:
-        """How many saturation offsets this problem simulates."""
+        """How many saturation offsets this experiment simulates."""
         return int(self.events.dt.shape[0])
 
     @property
@@ -122,43 +120,43 @@ class Problem:
                                  return_full_trajectory=False)[:, self.mz_loc]
 
     @classmethod
-    def stack(cls, problems: Sequence["Problem"]) -> "Problem":
+    def stack(cls, experiments: Sequence["Experiment"]) -> "Experiment":
         """Join several sequences into one, to be fitted against concatenated data.
 
         Parameters
         ----------
-        problems
+        experiments
             Problems sharing parameters, starting state and `mz_loc`, differing only in their
             sequence. A QUESP ladder is one per saturation power; a QUEST ladder is one per
             saturation time.
 
         Returns
         -------
-        Problem
-            A single problem whose offset axis is every input's offsets, in order. Shorter
+        Experiment
+            A single experiment whose offset axis is every input's offsets, in order. Shorter
             sequences are padded to the longest with leading no-ops, so ladders whose events
             differ in number -- as a QUEST ladder's always do -- stack like any other.
 
         Raises
         ------
         ValueError
-            If the list is empty or the problems disagree on `mz_loc`.
+            If the list is empty or the experiments disagree on `mz_loc`.
 
         Notes
         -----
         The measured data must be concatenated in the SAME order, which is the caller's job and
         the easiest thing to get wrong. Getting it wrong does not raise; it produces a fit.
         """
-        problems = list(problems)
-        if not problems:
-            raise ValueError("stack needs at least one problem")
-        locs = {p.mz_loc for p in problems}
+        experiments = list(experiments)
+        if not experiments:
+            raise ValueError("stack needs at least one experiment")
+        locs = {p.mz_loc for p in experiments}
         if len(locs) > 1:
-            raise ValueError(f"problems disagree on mz_loc: {sorted(locs)}; they must describe "
+            raise ValueError(f"experiments disagree on mz_loc: {sorted(locs)}; they must describe "
                              "the same pools in the same order")
 
-        width = max(p.n_events for p in problems)
-        padded = [pad_events(p.events, width) for p in problems]
+        width = max(p.n_events for p in experiments)
+        padded = [pad_events(p.events, width) for p in experiments]
         events = jax.tree.map(lambda *leaves: jnp.concatenate(leaves, axis=0), *padded)
-        first = problems[0]
+        first = experiments[0]
         return cls(first.params, events, first.m0, first.mz_loc)

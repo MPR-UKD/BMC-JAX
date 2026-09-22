@@ -15,7 +15,7 @@ python 01_pools.py
 | **02_simulate.py** | Pools to Z-spectrum. MTRasym, and why it is not a clean measure of one pool. `--plot` for a figure. |
 | **03_seq_file.py** | Write a real `.seq` with pypulseq, read it back, simulate it, and compare against the in-code sequence. |
 | **04_fit_one.py** | Fit k and f from one saturation level — and find where that quietly fails. |
-| **05_fit_ladder.py** | The QUESP ladder. `Problem.stack`, residual per rung, `at_bounds`. |
+| **05_fit_ladder.py** | The QUESP ladder. `Experiment.stack`, residual per rung, `at_bounds`. |
 | **06_quest.py** | The other ladder, in saturation time. Ragged sequences, and QUESP vs QUEST as a cross-check. |
 | **07_many_voxels.py** | A slice: per-voxel calibration held fixed, chunked memory, and what ignoring the maps costs. |
 

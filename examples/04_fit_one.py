@@ -9,7 +9,7 @@ Run:  python 04_fit_one.py
 """
 import numpy as np
 
-from bmc_jax.fitting import FitSpec, Problem, Slot, fit
+from bmc_jax.fitting import FitSpec, Experiment, Slot, fit
 from bmc_jax.io import example_config
 from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
 
@@ -22,7 +22,7 @@ B1_UT = 1.0
 NOISE = 0.002                       # 0.2 % of M0 -- an ordinary single-average CEST measurement
 
 events = cw_saturation(ppm, b1_uT=B1_UT, tsat_s=2.0, b0_T=params.system.b0)
-blank = Problem(jax_params, events, get_initial_magnetization(jax_params), params.mz_loc)
+blank = Experiment(jax_params, events, get_initial_magnetization(jax_params), params.mz_loc)
 
 
 def spec(x0_k):
@@ -34,7 +34,7 @@ def spec(x0_k):
 
 def measure(k_true, noise=0.0, seed=0):
     truth = jax_params._replace(cest_k=np.float32([k_true]))
-    z = np.asarray(Problem(truth, events, get_initial_magnetization(truth), params.mz_loc).simulate())
+    z = np.asarray(Experiment(truth, events, get_initial_magnetization(truth), params.mz_loc).simulate())
     if noise:
         z = z + np.random.default_rng(seed).normal(0, noise, z.shape)
     return z[None, :]

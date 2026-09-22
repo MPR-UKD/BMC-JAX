@@ -22,7 +22,7 @@ from ..jax_solver.utils import cast_params_to_dtype, cast_events_to_dtype
 from .spec import FitSpec, Slot, apply_x
 from .residual import _cast_problem, make_single_residual, make_phantom_residual
 from .optimize import _lm_one, c_out_select, lm_minimize
-from .problem import Problem
+from .experiment import Experiment
 from .result import FitResult
 
 def fit_voxel(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=True, dtype=None):
@@ -218,13 +218,13 @@ def fit_phantom_adam(base, events, M0_batch, water_z, spec, z_meas_batch,
     return np.asarray(X) * np.array([s.scale for s in spec.slots]), np.asarray(losses)
 
 
-def fit(problem, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **kwargs):
-    """Fit `spec`'s parameters of `problem` to `z_meas`. The entry point to prefer.
+def fit(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **kwargs):
+    """Fit `spec`'s parameters of `experiment` to `z_meas`. The entry point to prefer.
 
     Parameters
     ----------
     problem
-        A :class:`~bmc_jax.fitting.problem.Problem`. Use `Problem.stack` to fit several
+        A :class:`~bmc_jax.fitting.experiment.Experiment`. Use `Experiment.stack` to fit several
         experiments at once, which is what separating an exchange rate from a pool size requires.
     spec
         Which parameters are free, with their bounds and starting values.
@@ -261,32 +261,32 @@ def fit(problem, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **kwar
     -----
     This wraps `fit_phantom_lm`, which remains available and unchanged. The difference is that
     the state-vector index, the batching of the parameters and the shape handling come from the
-    `Problem` rather than from the caller.
+    `Experiment` rather than from the caller.
 
     Examples
     --------
     >>> # doctest: +SKIP
-    >>> res = fit(Problem.stack(ladder), spec, Z, n_per_block=len(ppm))
+    >>> res = fit(Experiment.stack(ladder), spec, Z, n_per_block=len(ppm))
     >>> print(res.summary())
     """
     z = jnp.atleast_2d(jnp.asarray(z_meas))
     n = z.shape[0]
 
-    base = problem.params
+    base = experiment.params
     batched = jnp.asarray(base.water_r1).ndim > 0
     if not batched:
         base = tile_params(base, n)
 
-    m0 = jnp.asarray(problem.m0)
+    m0 = jnp.asarray(experiment.m0)
     if m0.ndim == 1:
         m0 = jnp.broadcast_to(m0, (n,) + m0.shape)
 
-    X = np.asarray(fit_phantom_lm(base, problem.events, m0, problem.mz_loc, spec, z,
+    X = np.asarray(fit_phantom_lm(base, experiment.events, m0, experiment.mz_loc, spec, z,
                                   X0_phys=x0_phys, n_iter=n_iter, skip_first=False,
                                   base_batched=True, **kwargs))
 
     xs = spec.to_scaled(X)
     z_fit = np.asarray(jax.vmap(lambda b, x, s: simulate_spectrum(
-        apply_x(b, jnp.asarray(x), spec), problem.events, s,
-        return_full_trajectory=False)[:, problem.mz_loc])(base, jnp.asarray(xs), m0))
+        apply_x(b, jnp.asarray(x), spec), experiment.events, s,
+        return_full_trajectory=False)[:, experiment.mz_loc])(base, jnp.asarray(xs), m0))
     return FitResult(X, z_fit, np.asarray(z), spec, n_per_block)

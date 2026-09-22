@@ -11,7 +11,7 @@ Run:  python 06_quest.py
 """
 import numpy as np
 
-from bmc_jax.fitting import FitSpec, Problem, Slot, fit, pad_events
+from bmc_jax.fitting import FitSpec, Experiment, Slot, fit, pad_events
 from bmc_jax.io import example_config
 from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
 
@@ -37,19 +37,19 @@ NOISE = 0.002
 # spectrum. Not with a duration either: that is free relaxation, and it would add recovery time
 # to exactly the shortest rung, the one carrying the rate information.
 
-rungs = [Problem(jax_params, cw_saturation(ppm, b1_uT=1.0, tsat_s=t, b0_T=params.system.b0),
+rungs = [Experiment(jax_params, cw_saturation(ppm, b1_uT=1.0, tsat_s=t, b0_T=params.system.b0),
                  m0, params.mz_loc) for t in TSAT]
 # make them genuinely ragged, as a pulsed train would be
-rungs = [Problem(r.params, pad_events(r.events, r.n_events + 2 * i), r.m0, r.mz_loc)
+rungs = [Experiment(r.params, pad_events(r.events, r.n_events + 2 * i), r.m0, r.mz_loc)
          for i, r in enumerate(rungs)]
 print(f"events per rung before stacking: {[r.n_events for r in rungs]}")
 
-quest = Problem.stack(rungs)
+quest = Experiment.stack(rungs)
 print(f"after stacking: {quest.n_offsets} offsets x {quest.n_events} events "
       f"(padded to the longest)\n")
 
-quesp = Problem.stack([
-    Problem(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0,
+quesp = Experiment.stack([
+    Experiment(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0,
             params.mz_loc) for b in (0.25, 0.5, 1.0, 2.0, 4.0)])
 
 
@@ -60,7 +60,7 @@ def spec(x0_k):
 
 def measure(problem, k_true, seed=0):
     truth = jax_params._replace(cest_k=np.float32([k_true]))
-    z = np.asarray(Problem(truth, problem.events, get_initial_magnetization(truth),
+    z = np.asarray(Experiment(truth, problem.events, get_initial_magnetization(truth),
                            params.mz_loc).simulate())
     return (z + np.random.default_rng(seed).normal(0, NOISE, z.shape))[None, :]
 
@@ -74,7 +74,7 @@ print("-" * 68)
 for k_true in (150.0, 500.0, 1500.0):
     out = []
     for prob in (quesp, quest):
-        blank = Problem(jax_params, prob.events, m0, params.mz_loc)
+        blank = Experiment(jax_params, prob.events, m0, params.mz_loc)
         k = fit(blank, spec(3 * k_true), measure(prob, k_true), n_iter=80)["k"][0]
         out += [k, abs(k / k_true - 1)]
     agree = abs(out[0] / out[2] - 1)

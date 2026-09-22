@@ -9,7 +9,7 @@ Run:  python 05_fit_ladder.py
 """
 import numpy as np
 
-from bmc_jax.fitting import FitSpec, Problem, Slot, fit
+from bmc_jax.fitting import FitSpec, Experiment, Slot, fit
 from bmc_jax.io import example_config
 from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
 
@@ -25,15 +25,15 @@ NOISE = 0.002
 # ---------------------------------------------------------------------------------------------
 # Build the ladder
 # ---------------------------------------------------------------------------------------------
-# Problem.stack joins the rungs along the offset axis, so ONE residual spans the whole ladder.
+# Experiment.stack joins the rungs along the offset axis, so ONE residual spans the whole ladder.
 # That is what makes k and f identifiable. The measured data must be concatenated in the SAME
 # order -- that is the caller's job and the easiest thing here to get wrong, because getting it
 # wrong does not raise, it just produces a fit.
 
-one_rung = Problem(jax_params, cw_saturation(ppm, b1_uT=1.0, tsat_s=2.0, b0_T=params.system.b0),
+one_rung = Experiment(jax_params, cw_saturation(ppm, b1_uT=1.0, tsat_s=2.0, b0_T=params.system.b0),
                    m0, params.mz_loc)
-ladder = Problem.stack([
-    Problem(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0,
+ladder = Experiment.stack([
+    Experiment(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0), m0,
             params.mz_loc)
     for b in LADDER])
 print(f"one rung: {one_rung.n_offsets} offsets    ladder: {ladder.n_offsets} offsets "
@@ -47,7 +47,7 @@ def spec(x0_k):
 
 def measure(problem, k_true, seed=0):
     truth = jax_params._replace(cest_k=np.float32([k_true]))
-    z = np.asarray(Problem(truth, problem.events, get_initial_magnetization(truth),
+    z = np.asarray(Experiment(truth, problem.events, get_initial_magnetization(truth),
                            params.mz_loc).simulate())
     return (z + np.random.default_rng(seed).normal(0, NOISE, z.shape))[None, :]
 
@@ -61,7 +61,7 @@ print("-" * 56)
 for k_true in (50.0, 150.0, 500.0, 1500.0, 4000.0):
     row = []
     for prob in (one_rung, ladder):
-        blank = Problem(jax_params, prob.events, m0, params.mz_loc)
+        blank = Experiment(jax_params, prob.events, m0, params.mz_loc)
         k_fit = fit(blank, spec(3 * k_true), measure(prob, k_true), n_iter=80)["k"][0]
         row += [k_fit, abs(k_fit / k_true - 1)]
     print(f"{k_true:>8.0f} | {row[0]:>10.0f} {row[1]:>5.0%} | {row[2]:>14.0f} {row[3]:>5.0%}")
@@ -81,7 +81,7 @@ print("""
 
 k_true = np.array([80.0, 400.0, 2000.0])
 Z = np.concatenate([measure(ladder, k, seed=i) for i, k in enumerate(k_true)])
-blank = Problem(jax_params, ladder.events, m0, params.mz_loc)
+blank = Experiment(jax_params, ladder.events, m0, params.mz_loc)
 res = fit(blank, spec(300.0), Z, n_iter=80, n_per_block=len(ppm))
 
 print(f"\n{res}\n")
