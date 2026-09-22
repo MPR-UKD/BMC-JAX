@@ -1,133 +1,28 @@
+"""batching.py -- the same fit, over one spectrum, many voxels, or many GPUs.
+
+These four entry points differ in exactly two ways: which optimiser runs, and how the work is
+spread. `fit_voxel` is one spectrum on the CPU via scipy; `fit_phantom_lm` vmaps the JAX LM over
+every voxel; `fit_phantom_lm_sharded` splits that batch across the local GPUs; `fit_phantom_adam`
+replaces LM with one Adam loop over the whole phantom.
+
+That is a two-by-two grid written out as four functions, and a later step folds it into
+`fit(..., optimizer=, batch=)`. The four names stay exported regardless.
+
+`max_chunk` is the knob that matters in practice: vmapping over every voxel at once allocates
+for every voxel at once, and a large phantom will exhaust the card. Chunking bounds peak memory
+independently of how many voxels there are.
 """
-fitting.py  --  case-agnostic BMC fitting on top of the JAX simulator.
-
-Design (one-directional imports: this file is the TOP layer):
-
-    solver  ->  simulator (simulate_spectrum)  ->  voxel_simulator (simulate_voxels)
-                                                          ^
-                                                       fitting   (this file)
-
-Nothing here touches the physics. A tiny `FitSpec` says WHICH parameters to fit
-(no GAG/NOE hardcoding), and one residual core is shared by three backends:
-
-  * fit_voxel        : single voxel, scipy Levenberg-Marquardt + exact jacrev.
-                       (your old use case, done right -- LM not L-BFGS, residual
-                       vector not a scaled MSE, no magic LOSS_SCALE.)
-  * fit_phantom_lm   : MANY voxels, vmapped damped Gauss-Newton on the GPU.
-                       Most accurate per voxel; exact Jacobian via jacrev.
-  * fit_phantom_adam : MANY voxels, one optax/Adam loop over the whole phantom.
-                       Most scalable; pure gradient steps, no per-voxel solves.
-
-Per-voxel B0 and B1 are fit simply by listing them in the FitSpec (fields
-"b0_inhom" and "rel_b1"). They are real per-voxel parameters, not baked into the
-sequence.
-"""
-from dataclasses import dataclass, field
-from functools import partial
-from typing import List, Optional
-
 import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .jax_solver.param_adapter import JAXParams
-from .jax_solver.simulator import simulate_spectrum
-from .jax_solver.voxel_simulator import simulate_voxels, tile_params, extract_z_spectra
-from .jax_solver.utils import cast_params_to_dtype, cast_events_to_dtype
+from ..jax_solver.simulator import simulate_spectrum
+from ..jax_solver.voxel_simulator import simulate_voxels, tile_params, extract_z_spectra
+from ..jax_solver.utils import cast_params_to_dtype, cast_events_to_dtype
+from .spec import FitSpec, Slot, apply_x
+from .residual import _cast_problem, make_single_residual, make_phantom_residual
+from .optimize import _lm_one, c_out_select, lm_minimize
 
-
-def _cast_problem(base, events, M0, dtype):
-    """Downcast the whole problem (params, sequence, init state) to a dtype."""
-    if dtype is None:
-        return base, events, M0
-    return cast_params_to_dtype(base, dtype), cast_events_to_dtype(events, dtype), M0.astype(dtype)
-
-
-# ---------------------------------------------------------------------------
-# FitSpec: declare which parameters are free (replaces update_jax_params_gag)
-# ---------------------------------------------------------------------------
-@dataclass(frozen=True)
-class Slot:
-    name: str           # human label, e.g. "gag_k"
-    field: str          # JAXParams field, e.g. "cest_k", "cest_f", "b0_inhom", "rel_b1"
-    index: Optional[int] # pool index for array fields (cest_*); None for scalar fields
-    scale: float        # rough magnitude, so the optimiser sees O(1) numbers
-    lo: float           # lower bound (physical units)
-    hi: float           # upper bound (physical units)
-    x0: float           # initial guess (physical units)
-
-
-@dataclass(frozen=True)
-class FitSpec:
-    slots: List[Slot]
-
-    @property
-    def n(self):                 return len(self.slots)
-    @property
-    def scales(self):            return jnp.array([s.scale for s in self.slots])
-    @property
-    def lo_phys(self):           return np.array([s.lo for s in self.slots])
-    @property
-    def hi_phys(self):           return np.array([s.hi for s in self.slots])
-    @property
-    def x0_phys(self):           return np.array([s.x0 for s in self.slots])
-    # scaled versions (what the optimiser actually works in)
-    def to_scaled(self, x_phys): return np.asarray(x_phys) / np.array([s.scale for s in self.slots])
-    def to_phys(self, x_scaled): return np.asarray(x_scaled) * np.array([s.scale for s in self.slots])
-
-
-# ---------------------------------------------------------------------------
-# Write a flat (scaled) parameter vector into a JAXParams (traceable + vmappable)
-# ---------------------------------------------------------------------------
-def apply_x(base: JAXParams, x_scaled: jnp.ndarray, spec: FitSpec) -> JAXParams:
-    """x_scaled -> physical -> written into the named slots. Pure JAX; safe under vmap."""
-    dt = base.water_r1.dtype                      # match the params' dtype (fp32/fp64)
-    x_phys = (x_scaled * spec.scales).astype(dt)
-    updates = {}
-    for i, s in enumerate(spec.slots):
-        val = x_phys[i]
-        if s.index is None:
-            updates[s.field] = val
-        else:
-            cur = updates.get(s.field, getattr(base, s.field))
-            updates[s.field] = cur.at[s.index].set(val)
-    return base._replace(**updates)
-
-
-# ---------------------------------------------------------------------------
-# Residual core (shared by all backends)
-# ---------------------------------------------------------------------------
-def make_single_residual(base, events, M0, water_z, spec, z_meas, skip_first=True):
-    """Returns r(x_scaled) -> residual vector for ONE voxel (z_sim - z_meas)."""
-    z_t = jnp.asarray(z_meas[1:] if skip_first else z_meas)
-
-    def resid(x_scaled):
-        params = apply_x(base, x_scaled, spec)
-        z = simulate_spectrum(params, events, M0, return_full_trajectory=False)[:, water_z]
-        zc = z[1:] if skip_first else z
-        return zc - z_t
-    return resid
-
-
-def make_phantom_residual(base, events, M0, water_z, spec, z_meas_batch, skip_first=True):
-    """Returns R(X_scaled) -> (N_voxels, n_resid) residuals for the whole phantom.
-    base is ONE shared JAXParams (fixed fields); X_scaled is (N_voxels, n_params)."""
-    Z_t = jnp.asarray(z_meas_batch[:, 1:] if skip_first else z_meas_batch)
-    n_vox = z_meas_batch.shape[0]
-    base_b = tile_params(base, n_vox)                       # broadcast fixed fields
-
-    def resid(X_scaled):
-        params_b = jax.vmap(apply_x, in_axes=(0, 0, None))(base_b, X_scaled, spec)
-        Z = simulate_voxels(params_b, events, M0, return_full_trajectory=False)
-        Zc = extract_z_spectra(Z, water_z)                  # (N, n_offsets)
-        Zc = Zc[:, 1:] if skip_first else Zc
-        return Zc - Z_t                                     # (N, n_resid)
-    return resid
-
-
-# ---------------------------------------------------------------------------
-# Backend 1: single-voxel Levenberg-Marquardt (scipy + exact Jacobian)
-# ---------------------------------------------------------------------------
 def fit_voxel(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=True, dtype=None):
     from scipy.optimize import least_squares
     base, events, M0 = _cast_problem(base, events, M0, dtype)
@@ -147,54 +42,6 @@ def fit_voxel(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=
         method="trf",
     )
     return spec.to_phys(res.x), res
-
-
-# ---------------------------------------------------------------------------
-# Backend 2: whole-phantom vmapped damped Gauss-Newton (most accurate)
-# ---------------------------------------------------------------------------
-@partial(jax.jit, static_argnames=["resid_fn", "n_iter", "use_fwd", "return_trajectory"])
-def _lm_one(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=False, return_trajectory=False):
-    """Damped Gauss-Newton (LM) for ONE voxel, fixed iterations with accept/reject.
-    Bounds enforced by clipping the step. Pure JAX -> vmappable.
-
-    use_fwd selects forward-mode (jacfwd) instead of reverse-mode (jacrev) for the Jacobian.
-    They give the identical Jacobian; forward mode is far cheaper in MEMORY when the residual
-    is tall (few params, many offsets) because it doesn't store the spectrum's forward
-    trajectory -- essential for long multi-B1/Tsat schedules. Default stays jacrev.
-
-    return_trajectory=True also returns (X_traj (n_iter, P) scaled, C_traj (n_iter,) cost) -- the
-    per-iteration parameter + cost path. Used by benchmark_lm_convergence to check that the fixed
-    n_iter is enough (the LM has no gtol/ftol). The scan already carried the cost as its stacked
-    output; this just also stacks x, so it is nearly free (n_iter x P extra)."""
-    jacfn = (jax.jacfwd if use_fwd else jax.jacrev)(resid_fn)
-    P = x0.shape[0]
-    eye = jnp.eye(P, dtype=x0.dtype)             # match x0 precision (else x64 forces float64 here)
-
-    def body(state, _):
-        x, lam = state
-        r = resid_fn(x)
-        c = jnp.sum(r ** 2)
-        J = jacfn(x)
-        g = J.T @ r
-        H = J.T @ J
-        A = H + lam * (jnp.diag(jnp.diag(H)) + 1e-9 * eye)
-        delta = jnp.linalg.solve(A, -g)
-        x_new = jnp.clip(x + delta, lo, hi)
-        c_new = jnp.sum(resid_fn(x_new) ** 2)
-        better = c_new < c
-        x_out = jnp.where(better, x_new, x)
-        lam_out = jnp.where(better, lam * 0.5, lam * 3.0)
-        return (x_out, lam_out), (x_out, c_out_select(better, c_new, c))
-
-    (xf, _), (X_traj, C_traj) = jax.lax.scan(body, (x0, jnp.asarray(lam0, x0.dtype)),
-                                             None, length=n_iter)
-    if return_trajectory:
-        return xf, X_traj, C_traj
-    return xf
-
-
-def c_out_select(better, a, b):
-    return jnp.where(better, a, b)
 
 
 def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
@@ -277,9 +124,6 @@ def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
     return np.asarray(Xf) * scales               # physical (N, P)
 
 
-# ---------------------------------------------------------------------------
-# Backend 2b: MULTI-GPU whole-phantom Gauss-Newton (voxels sharded across devices)
-# ---------------------------------------------------------------------------
 def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
                            n_iter=40, skip_first=True, n_devices=None, base_batched=False,
                            use_fwd=None, per_device_chunk=256):
@@ -335,9 +179,6 @@ def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
     return Xf * scales                               # physical (n_vox, P)
 
 
-# ---------------------------------------------------------------------------
-# Backend 3: whole-phantom Adam (most scalable)
-# ---------------------------------------------------------------------------
 def fit_phantom_adam(base, events, M0_batch, water_z, spec, z_meas_batch,
                      X0_phys=None, n_steps=400, lr=2e-2, skip_first=True):
     import optax

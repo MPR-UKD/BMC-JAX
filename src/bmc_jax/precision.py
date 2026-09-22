@@ -1,40 +1,49 @@
-"""precision.py -- one fp32/fp64 switch for the fit scripts.
+"""One switch for float32 vs float64.
 
-The fits default to 32-bit (the FAST path): consumer GPUs run fp64 at ~1/64 rate, and fp64 costs
-~2.8x even on the measured BMC workload, so fp64-by-default silently made every run ~3x slower
-than it needed to be. Set FIT_X64=1 to force the WHOLE fit path back to 64-bit (the SLOW path) --
-worth doing when a fit looks numerically suspect (the matrix-exponential step can be stiff at slow
-exchange / high B1).
+WHY 32-BIT IS THE DEFAULT
+  Consumer GPUs run fp64 at roughly 1/64 of fp32 throughput, and on the measured Bloch-McConnell
+  workload fp64 costs about 2.8x even accounting for that. Defaulting to fp64 silently makes
+  every run about three times slower than it needs to be, for accuracy that k/f fitting does not
+  use: ~4000 sequential matrix steps in fp32 accumulate a random walk of order 1e-4, well below
+  the systematic uncertainties of a real measurement.
 
-The benchmarks that must SEE both precisions (benchmark_recovery, crb_calibration,
-benchmark_fit_scaling) enable x64 themselves and select dtype per fit, so they are unaffected by
-this default -- they are exactly the ones producing the "is fp32 good enough?" evidence.
-
-Call configure_x64() right after `import jax`, BEFORE importing jax.numpy or creating any array
-(jax.config must be set before the first array). With x64 disabled JAX canonicalises every
-float64 request down to float32, so the rest of the code needs no changes.
+WHEN TO TURN IT ON
+  When a fit looks numerically suspect rather than physically wrong. The matrix-exponential step
+  can be stiff at slow exchange and high B1, and a near-singular Jacobian can have fp32 reading
+  noise in its columns -- a Cramer-Rao bound computed in fp32 has been seen to differ from the
+  fp64 one by 9x on a slow pool. If a result changes when you flip this, it was never a result.
 
     import jax
-    from precision import configure_x64
-    configure_x64()
+    from bmc_jax.precision import configure_x64
+    configure_x64(True)          # BEFORE importing jax.numpy or creating any array
     import jax.numpy as jnp
 
-(benchmark_fit_scaling is intentionally exempt: it always enables x64 because it explicitly
-times BOTH precisions and needs fp64 available regardless of FIT_X64.)
+  JAX requires the setting before the first array exists. With x64 off, JAX canonicalises every
+  float64 request down to float32, so nothing else in the code needs to change.
+
+NO ENVIRONMENT VARIABLES
+  This used to read FIT_X64 -- a variable named after the research project this code came from,
+  documented nowhere a user of the installed package would look. A library whose global numerical
+  precision depends on an undocumented environment variable is not shippable: two identical
+  scripts give different answers on two machines and nothing in either says why.
+
+  Precision is an argument. If you want it environment-driven, that is your application's choice
+  to make, explicitly:
+
+      configure_x64(os.environ.get("MY_APP_X64") == "1")
 """
-import os
 import jax
 
-_TRUE = ("1", "true", "yes", "on")
+
+def configure_x64(enable: bool = False) -> bool:
+    """Set JAX's global precision. Returns whether 64-bit is now active.
+
+    Must be called before `import jax.numpy` and before any array is created.
+    """
+    jax.config.update("jax_enable_x64", bool(enable))
+    return x64_enabled()
 
 
 def x64_enabled() -> bool:
-    """True only if FIT_X64 is set to a truthy value (1/true/yes/on). Default: 32-bit fast path."""
-    return os.environ.get("FIT_X64", "0").strip().lower() in _TRUE
-
-
-def configure_x64() -> bool:
-    """Set JAX precision from FIT_X64 (default 32-bit FAST). Returns True if 64-bit is active."""
-    on = x64_enabled()
-    jax.config.update("jax_enable_x64", on)
-    return on
+    """Whether JAX is currently in 64-bit mode. Reads JAX, not the environment."""
+    return bool(jax.config.read("jax_enable_x64"))

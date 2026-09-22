@@ -31,7 +31,7 @@ The layout is being reorganised in steps, each one gated on that test:
 | step | change | state |
 |------|--------|-------|
 | 1 | `solver.py` -> `matrix.py` (it builds the BMC matrix; it is not a fitter), plus `sequences.py` so a sequence can be built in code | done |
-| 2 | `fitting.py` -> a package: `spec / problem / residual / optimize / batching / result` | |
+| 2 | `fitting.py` -> a package: `spec / residual / optimize / batching` | done |
 | 3 | optimiser and batching become arguments rather than four separate entry points | |
 | 4 | `Problem.stack()` for multi-experiment ladders (QUESP over B1, QUEST over saturation time) | |
 | 5 | native config dataclasses, so bmctool is optional rather than the only way in | |
@@ -45,9 +45,17 @@ Old names stay exported at every step until the last one.
 ## Tests
 
 ```bash
-pytest tests/test_solver.py              # physics invariants -- needs nothing but this package
-pytest tests/test_equivalence_solver.py  # bit-identity vs the research copy; skips without it
+pytest tests/          # 53 tests, ~30 s
 ```
+
+| file | what it checks | needs |
+|------|----------------|-------|
+| `test_solver.py` | physics invariants of the forward model | nothing |
+| `test_config.py` | reading a Pulseq-CEST config | nothing |
+| `test_fitting.py` | simulate, then fit the parameters back | nothing |
+| `test_structure.py` | the package's own layering rules | nothing |
+| `test_config_vs_bmctool.py` | agreement with the reference reader | bmctool |
+| `test_equivalence_solver.py` | bit-identity with the research copy | DLQCest (temporary) |
 
 `test_solver.py` asserts things that are true of any correct Bloch-McConnell implementation --
 the far wing returns to 1, a pool-free spectrum is even in ppm, a pool at +dw dips only on its
