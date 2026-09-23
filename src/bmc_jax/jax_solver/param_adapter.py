@@ -160,15 +160,32 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
         use_pulse_frame=use_pulse_frame,
     )
 
-def get_initial_magnetization(jax_params: JAXParams) -> jnp.ndarray:
-    """
-    Constructs the initial magnetization vector based on the simulation parameters.
-    
-    Args:
-        jax_params: JAXParams container.
-        
-    Returns:
-        jnp.ndarray: The initial magnetization vector M0.
+def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.ndarray:
+    """Build the starting magnetisation vector.
+
+    Parameters
+    ----------
+    jax_params
+        The parameters the state vector must match in size and dtype.
+    scale
+        Longitudinal magnetisation at the start of saturation, as a fraction of equilibrium.
+        1.0 is thermal equilibrium.
+
+    Returns
+    -------
+    jnp.ndarray
+        M0, of length 3 * (1 + n_cest) + 1.
+
+    Notes
+    -----
+    `scale` below 1.0 is not a fudge factor. A sequence that reads out repeatedly does not let
+    the magnetisation recover fully before the next saturation block, so saturation begins from a
+    reduced state. Assuming equilibrium instead puts the whole simulated Z-spectrum too high, and
+    a fit will absorb that offset into whatever parameter is free -- usually the pool size.
+
+    Only the LONGITUDINAL components are scaled. The relaxation TARGET stays at equilibrium
+    (water_f, cest_f), so the solver correctly relaxes from the reduced start back up during any
+    recovery delay in the sequence. Scaling the target instead would model a smaller sample.
     """
     n_cest = jax_params.cest_k.shape[0]
     n_total_pools = 1 + n_cest
@@ -187,5 +204,12 @@ def get_initial_magnetization(jax_params: JAXParams) -> jnp.ndarray:
         
     # Set MT pool Z-magnetization
     M_init = M_init.at[3 * n_total_pools].set(jax_params.mt_f)
-    
+
+    # Scale only the longitudinal slots: water Mz and the CEST pools' Mz. The transverse
+    # components are zero anyway, and the MT pool is left alone because it is not what the
+    # readout depleted.
+    if scale != 1.0:
+        z0 = 2 * n_total_pools
+        M_init = M_init.at[z0:z0 + n_total_pools].multiply(scale)
+
     return M_init

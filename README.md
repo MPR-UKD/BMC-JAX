@@ -147,6 +147,7 @@ pytest                    # 69 tests, plus the docstring examples
 | `test_fitting.py` | simulate, then fit the parameters back |
 | `test_config.py` | reading a Pulseq-CEST config |
 | `test_structure.py` | the package's own layering rules |
+| `test_equivalence_phantom.py` | a real 7-rung ladder fit against a published result (needs `DLQCEST_ROOT`) |
 
 `test_solver.py` asserts what is true of *any* correct Bloch–McConnell implementation — the far
 wing returns to 1, a pool-free spectrum is even in ppm, a pool at `+dw` dips only on its own side,
