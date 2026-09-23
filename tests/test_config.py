@@ -156,3 +156,44 @@ def test_a_pool_built_from_python_ints_is_also_float():
     from bmc_jax.io import CESTPool
     pool = CESTPool(f=1, t1=1, t2=1, k=50, dw=3)
     assert all(isinstance(v, float) for v in (pool.f, pool.k, pool.dw, pool.r1, pool.r2))
+
+
+def test_options_scale_reaches_the_simulation():
+    """`scale: 0.5` in a config must change the starting magnetisation, not be quietly dropped.
+
+    convert_params carries no options, so a caller who builds the starting state by hand gets
+    equilibrium whatever the config says. Experiment.from_parameters is what closes that, and
+    this pins it: without the test the field can go back to being ignored and every spectrum
+    would simply sit a little too high.
+    """
+    from dataclasses import replace
+
+    from bmc_jax.fitting import Experiment
+    from bmc_jax.jax_solver import cw_saturation
+
+    params = example_config("amide_noe_mt")
+    events = cw_saturation(np.linspace(-6.0, 6.0, 21), b1_uT=1.0, tsat_s=2.0, b0_T=params.system.b0)
+
+    at_equilibrium = Experiment.from_parameters(params, events)
+    reduced = Experiment.from_parameters(
+        replace(params, options=replace(params.options, scale=0.582)), events)
+
+    assert float(at_equilibrium.m0[params.mz_loc]) == pytest.approx(1.0)
+    assert float(reduced.m0[params.mz_loc]) == pytest.approx(0.582, rel=1e-5)
+    assert np.asarray(reduced.simulate()).max() < np.asarray(at_equilibrium.simulate()).max()
+
+
+def test_the_mt_pool_is_scaled_too():
+    """Pin the convention: `scale` multiplies every pool, matching the format's reference.
+
+    This is not free to get wrong. With an MT pool present, scaling it or not changes Z by up to
+    2.6e-3 -- at the noise floor of a real measurement, so a fit would absorb the difference
+    into a parameter rather than anyone noticing it.
+    """
+    from bmc_jax.jax_solver import convert_params, get_initial_magnetization
+
+    jp = convert_params(example_config("amide_noe_mt"))
+    m_eq = np.asarray(get_initial_magnetization(jp))
+    m_scaled = np.asarray(get_initial_magnetization(jp, scale=0.582))
+    assert m_scaled == pytest.approx(m_eq * 0.582, rel=1e-6)
+    assert m_scaled[-1] == pytest.approx(m_eq[-1] * 0.582), "the MT slot was not scaled"

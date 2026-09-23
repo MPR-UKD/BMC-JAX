@@ -183,16 +183,24 @@ def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.
     reduced state. Assuming equilibrium instead puts the whole simulated Z-spectrum too high, and
     a fit will absorb that offset into whatever parameter is free -- usually the pool size.
 
-    Only the LONGITUDINAL components are scaled. The relaxation TARGET stays at equilibrium
-    (water_f, cest_f), so the solver correctly relaxes from the reduced start back up during any
-    recovery delay in the sequence. Scaling the target instead would model a smaller sample.
+    The relaxation TARGET stays at equilibrium (water_f, cest_f), so the solver correctly relaxes
+    from the reduced start back up during any recovery delay. Scaling the target instead would
+    model a smaller sample, which is a different thing entirely.
+
+    THE MT POOL IS SCALED TOO, matching the reference implementation of the Pulseq-CEST format.
+    An argument can be made either way on physics -- `scale` describes what the readout left
+    behind, and whether a semi-solid pool is depleted along with water is not obvious -- but the
+    field belongs to a published format, so it has to mean what that format's reference says it
+    means. The choice is not cosmetic: with an MT pool present the two conventions differ by up
+    to 2.6e-3 in Z, which is at the noise floor of a real measurement and therefore exactly the
+    size of error that gets absorbed into a fitted parameter instead of being noticed.
     """
     n_cest = jax_params.cest_k.shape[0]
     n_total_pools = 1 + n_cest
     size = 3 * n_total_pools + 1
     
-    # Match the params' active float precision (float64 under x64, float32 when FIT_X64=0) so M0
-    # and the params share a dtype -- avoids a float64-truncation warning in 32-bit mode.
+    # Match the params' active float precision so M0 and the params share a dtype -- this avoids
+    # a float64-truncation warning when running in 32-bit mode.
     M_init = jnp.zeros(size, dtype=jax_params.water_f.dtype)
     
     # Set Water Z-magnetization to water fraction (typically 1.0)
@@ -205,11 +213,9 @@ def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.
     # Set MT pool Z-magnetization
     M_init = M_init.at[3 * n_total_pools].set(jax_params.mt_f)
 
-    # Scale only the longitudinal slots: water Mz and the CEST pools' Mz. The transverse
-    # components are zero anyway, and the MT pool is left alone because it is not what the
-    # readout depleted.
+    # Scale every populated slot, the MT pool included. The transverse components are zero, so
+    # in practice this is water Mz, the CEST pools' Mz and the MT pool.
     if scale != 1.0:
-        z0 = 2 * n_total_pools
-        M_init = M_init.at[z0:z0 + n_total_pools].multiply(scale)
+        M_init = M_init * scale
 
     return M_init

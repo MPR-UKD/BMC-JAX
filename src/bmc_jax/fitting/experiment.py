@@ -120,6 +120,44 @@ class Experiment:
                                  return_full_trajectory=False)[:, self.mz_loc]
 
     @classmethod
+    def from_parameters(cls, params, events) -> "Experiment":
+        """Build from a config object and a sequence. The entry point to prefer.
+
+        Parameters
+        ----------
+        params
+            Anything with `water_pool`, `cest_pools`, `mt_pool`, `system` and `options` --
+            `bmc_jax.io.Parameters`, a bmctool `Parameters`, or your own object.
+        events
+            Batched `SimEvent`, from `cw_saturation` or from a Pulseq `.seq`.
+
+        Returns
+        -------
+        Experiment
+
+        Notes
+        -----
+        This does the three things a caller would otherwise do by hand, and does the third one
+        correctly: convert the pools, build the starting magnetisation, and find water's Mz.
+
+        The third is the reason this exists. `options.scale` -- the magnetisation the sequence
+        starts from, as a fraction of equilibrium -- is part of the config format, but the
+        parameter conversion does not carry it, so a caller who builds the starting state
+        themselves silently gets equilibrium no matter what their config says. Anything below 1.0
+        raises the whole simulated Z-spectrum, and a fit absorbs that into the pool size.
+
+        Examples
+        --------
+        >>> # doctest: +SKIP
+        >>> exp = Experiment.from_parameters(example_config("amide"), events)
+        """
+        from ..jax_solver.param_adapter import convert_params, get_initial_magnetization
+
+        jax_params = convert_params(params)
+        scale = float(getattr(params.options, "scale", 1.0))
+        return cls(jax_params, events, get_initial_magnetization(jax_params, scale), params.mz_loc)
+
+    @classmethod
     def stack(cls, experiments: Sequence["Experiment"]) -> "Experiment":
         """Join several sequences into one, to be fitted against concatenated data.
 
