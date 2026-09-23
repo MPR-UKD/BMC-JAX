@@ -140,10 +140,10 @@ def test_integer_config_values_become_float_parameters():
     An integer array has zero derivative, so a parameter built from one cannot be fitted -- the
     optimiser reports the starting value back and nothing says anything is wrong. Pulseq-CEST's
     own reference configs write `k: 50`, so this is the normal case, not a corner one. Only
-    mt_lineshape and use_pulse_frame are genuinely discrete and stay integer.
+    mt_lineshape is genuinely discrete and stays integer.
     """
     from bmc_jax.jax_solver import convert_params
-    discrete = {"mt_lineshape", "use_pulse_frame"}
+    discrete = {"mt_lineshape"}
     for name in ALL:
         jp = convert_params(example_config(name))
         ints = [f for f, v in zip(jp._fields, jp)

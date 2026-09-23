@@ -3,7 +3,7 @@
 EVERY PHYSICAL PARAMETER IS FORCED TO FLOAT. Configs routinely write `k: 50` rather than
 `k: 50.0`, and an integer reaching the solver becomes an integer array whose derivative is zero:
 the parameter then cannot be fitted, and nothing says so -- the optimiser simply reports the
-starting value back. Only the genuinely discrete fields (mt_lineshape, use_pulse_frame) stay
+starting value back. Only the genuinely discrete field (mt_lineshape) stays
 integer.
 
 `convert_params` is duck-typed on purpose. It reads attributes and never checks a class, so any
@@ -47,9 +47,6 @@ class JAXParams(NamedTuple):
     gamma: jnp.ndarray     # Gyromagnetic ratio [MHz/T]
     b0_inhom: jnp.ndarray  # B0 inhomogeneity [ppm]
     rel_b1: jnp.ndarray    # Relative B1 field (scaling factor)
-    
-    # Simulation Options
-    use_pulse_frame: jnp.ndarray # Boolean flag (1=True, 0=False)
 
 def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXParams:
     """
@@ -133,11 +130,6 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
     b0_inhom = jnp.asarray(params.system.b0_inhom, dtype=float)
     rel_b1 = jnp.asarray(params.system.rel_b1, dtype=float)
     
-    # --- Options ---
-    # Sequence evaluation threshold logic
-    # Toggles optimization strategies based on predicted pulse discretizations.
-    use_pulse_frame = jnp.array(1 if params.options.max_pulse_samples <= 200 else 0)
-
     return JAXParams(
         water_r1=water_r1,
         water_r2=water_r2,
@@ -157,7 +149,6 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
         gamma=gamma,
         b0_inhom=b0_inhom,
         rel_b1=rel_b1,
-        use_pulse_frame=use_pulse_frame,
     )
 
 def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.ndarray:

@@ -36,8 +36,7 @@ def params(f=0.005, k=300.0, dw=DW, t2_pool_s=0.01):
         cest_r1=np.float32([1.0]), cest_r2=np.float32([1.0 / t2_pool_s]),
         mt_k=s(0), mt_f=s(0), mt_dw=s(0), mt_r1=s(0), mt_r2=s(1),
         mt_lineshape=np.int32(0),
-        b0=s(B0_T), gamma=s(267.5153), b0_inhom=s(0), rel_b1=s(1.0),
-        use_pulse_frame=np.int32(0))
+        b0=s(B0_T), gamma=s(267.5153), b0_inhom=s(0), rel_b1=s(1.0))
 
 
 def z_spectrum(p, ppm, b1_uT=1.0, tsat_s=2.0):

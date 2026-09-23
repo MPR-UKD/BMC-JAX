@@ -109,8 +109,7 @@ def vial_params(data):
         b0=jnp.asarray(float(data["b0_T"]) * ones),
         gamma=jnp.asarray(267.5153 * ones),
         b0_inhom=jnp.asarray(data["b0_hz"] / (42.5764 * float(data["b0_T"]))),
-        rel_b1=jnp.asarray(data["rel_b1"]),
-        use_pulse_frame=jnp.zeros(n, jnp.int32))
+        rel_b1=jnp.asarray(data["rel_b1"]))
 
 
 def start_magnetisation(params):
