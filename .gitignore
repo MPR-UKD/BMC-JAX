@@ -15,3 +15,9 @@ dist/
 # tutorial output
 examples/*.png
 examples/*.seq
+
+# ...but the phantom measurement tutorials 08 and 09 fit is not generated output. It is the
+# input to the fit -- 0.9 MB of Z-spectra and converted sequences -- and must ship, or those
+# two tutorials do not run for anyone who clones this.
+!examples/data/*.npz
+!examples/data/events/*.npz
