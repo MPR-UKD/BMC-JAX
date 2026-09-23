@@ -50,6 +50,26 @@ offset and not 128 phase-encode lines.
 Each file carries one offset more than the Z-spectra: the sequences acquire an unsaturated
 reference at −300 ppm first. `_phantom.load_events` drops it.
 
+**`seqs/*.seq`** (11 MB, about 1 MB in the repository once compressed) — the Pulseq files those
+events were converted from. The tutorials do not read them; they are here so the sequences are
+inspectable and reconvertible rather than something you have to take on trust. Their
+`[DEFINITIONS]` block states the B1 levels, every offset, the saturation timing and the gap
+spoiling, so each file documents the acquisition it belongs to.
+
+Reconverting one needs pypulseq and costs several GB and about a minute:
+
+```python
+import pypulseq as pp
+from bmc_jax.jax_solver.seq_adapter import convert_sequence_batch
+
+seq = pp.Sequence()
+seq.read("data/seqs/quesp_sim_b1_1uT.seq")
+events, n_offsets = convert_sequence_batch(seq, max_pulse_samples=200)
+```
+
+`max_pulse_samples` must be the 200 the cache was built with. A different value gives a
+different forward model, not an error.
+
 ## What is not here
 
 The scanner raw data, the reconstruction, the B0 and B1 maps, the T1 and T2 mapping, and the

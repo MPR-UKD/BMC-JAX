@@ -21,3 +21,4 @@ examples/*.seq
 # two tutorials do not run for anyone who clones this.
 !examples/data/*.npz
 !examples/data/events/*.npz
+!examples/data/seqs/*.seq

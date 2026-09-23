@@ -137,17 +137,16 @@ so fit in float32 and re-check anything that turns on a smaller difference with
 ## Tests
 
 ```bash
-pytest                    # 69 tests, plus the docstring examples
+pytest                    # 63 tests, plus the docstring examples
 ```
 
 | | checks |
 |---|---|
 | `test_solver.py` | physics invariants of the forward model |
-| `test_problem.py` | stacking experiments, and the padding that makes it safe |
+| `test_experiment.py` | stacking experiments, and the padding that makes it safe |
 | `test_fitting.py` | simulate, then fit the parameters back |
 | `test_config.py` | reading a Pulseq-CEST config |
 | `test_structure.py` | the package's own layering rules |
-| `test_equivalence_phantom.py` | a real 7-rung ladder fit against a published result (needs `DLQCEST_ROOT`) |
 
 `test_solver.py` asserts what is true of *any* correct Bloch–McConnell implementation — the far
 wing returns to 1, a pool-free spectrum is even in ppm, a pool at `+dw` dips only on its own side,
@@ -157,6 +156,16 @@ does what it did; these check that what it does is right, and they need no data 
 
 Docstring examples run as tests, so an example that stops being true fails the build rather than
 misleading the next reader.
+
+Every test runs from a clean clone, and every one of them runs: no skips, no environment
+variable pointing somewhere else, no optional package standing between you and a green suite.
+The package itself depends on numpy and jax and nothing more.
+
+The heaviest end-to-end check is not a test but a tutorial. `examples/08_quesp.py` fits a real
+phantom measurement that ships with it -- four tubes, a seven-rung saturation ladder -- and takes
+a few minutes. Two of those tubes hold the same solution at the same concentration, so their
+fitted pool sizes have to agree, which is the one check there that no calibration error can
+satisfy by accident.
 
 ## License
 

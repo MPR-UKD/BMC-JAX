@@ -1,11 +1,6 @@
 """
 MRF dictionary generation on top of the voxel-batched BMC simulator.
 
-Deliberately isolated here (inside the GPU_Scaling container copy) instead of
-cesty/core/qcest -- this is where it will actually run (Docker build context
-can't reach outside GPU_Scaling/batch_benchmark_app), and it needs to prove
-out against real hardware/scaling before being mirrored into core.
-
 A "dictionary entry" is exactly a voxel in voxel_simulator.py's sense: one
 JAXParams instance run against one shared MRF acquisition sequence. This
 module only adds what voxel_simulator.py doesn't have -- turning a
