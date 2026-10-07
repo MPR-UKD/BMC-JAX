@@ -53,6 +53,9 @@ class FitResult:
         (fit_joint) Sum of squared residuals after every LM step.
     nan_steps
         (fit_joint) LM steps rejected because the Jacobian had NaN / inf.
+    blocks
+        (fit_joint) Parameters with one value per experiment (scope="block"): name -> dict(x, sd,
+        at_bounds), each of shape (n_blocks,). Their column of `x` is NaN; `res[name]` returns `x` here.
 
     Examples
     --------
@@ -75,6 +78,7 @@ class FitResult:
     x0: np.ndarray | None = None
     cost: np.ndarray | None = None
     nan_steps: int = 0
+    blocks: dict | None = None
 
     @property
     def names(self) -> list[str]:
@@ -82,13 +86,16 @@ class FitResult:
         return [s.name for s in self.spec.slots]
 
     def __getitem__(self, name: str) -> np.ndarray:
-        """Fitted values of one parameter across all samples, by name.
+        """Fitted values of one parameter across all samples, by name (across the experiments, for a
+        per-block parameter of fit_joint).
 
         Raises
         ------
         KeyError
             If no slot has that name.
         """
+        if self.blocks and name in self.blocks:
+            return self.blocks[name]["x"]
         try:
             return self.x[:, self.names.index(name)]
         except ValueError:
@@ -156,6 +163,9 @@ class FitResult:
             rows.append("* on a bound -- not a measurement, the optimiser was stopped there")
         if self.free is not None and not self.free.all():
             rows.append("= not free in this sample: the value its params carry")
+        for name, b in (self.blocks or {}).items():
+            rows.append(f"{name} per experiment: " + "  ".join(
+                f"{v:.5g}{'*' if r else ''}" for v, r in zip(b["x"], b["at_bounds"])))
         return "\n".join(rows)
 
     def __repr__(self) -> str:

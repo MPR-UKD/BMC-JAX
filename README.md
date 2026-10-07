@@ -119,12 +119,21 @@ from bmc_jax.fitting import FitSpec, FreeParam, fit_joint
 spec = FitSpec([
     FreeParam("k", "cest_k", 0, 100.0, 5.0, 2000.0, 300.0),                     # one per sample
     FreeParam("f", "cest_f", 0, 0.001, 1e-5, 0.03, 0.005),
-    FreeParam("r2w", "water_r2", None, 1.0, 0.1, 5.0, 0.6, scope="shared"),     # one for all samples
+    FreeParam("r2f", "water_r2", None, 1.0, 0.5, 1.5, 1.0,                      # one factor on every
+              scope="shared", mode="factor"),                                  # sample's measured R2
+    FreeParam("m0", "m_start", None, 1.0, 0.1, 1.0, 0.6, scope="shared"),        # the start state
+    FreeParam("db0", "b0_inhom", None, 0.01, -0.1, 0.1, 0.0,                     # a B0 drift per rung,
+              scope="block", mode="add"),                                      # on top of the B0 map
     FreeParam("f_noe", "cest_f", 1, 0.001, 0.0, 0.03, 0.002, samples=(0, 1)),   # only where it exists
 ])
 res = fit_joint(ladder, spec, Z, n_per_block=len(ppm))
-res["r2w"], res.sd, res.free
+res["r2f"], res["db0"], res.sd, res.free
 ```
+
+`scope` is one value per sample (the default), one for all of them (`"shared"`) or one per experiment
+of a stacked ladder (`"block"`). `mode` replaces the carried value (the default), multiplies it
+(`"factor"`) or shifts it (`"add"`). `"m_start"` is not a SimParams field but the magnetisation the
+sequence starts from; free as a value, the start state is rebuilt from the current pools at every step.
 
 Where a value is not free, the sample keeps what its params carry, exactly. The Jacobian is built per
 sample, for that sample's own parameters, so a shared value costs one more column, not another fit.

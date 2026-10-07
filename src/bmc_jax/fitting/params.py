@@ -16,7 +16,15 @@ per-voxel parameters, not something baked into the sequence.
 sample it is free in -- a property the samples have in common, such as a scanner's field error or a
 relaxation factor of a common solvent. `samples=(0, 2)` frees it only in those samples; every other
 sample keeps the value its params carry, exactly -- a second pool that only some samples contain, or a
-pool size known in one sample. Both need `fit_joint`; `fit` solves every sample alone and refuses them.
+pool size known in one sample. `scope="block"` is one value per experiment of a stacked ladder (per
+rung), shared by the samples -- a field drift between the rungs of a scan.
+
+`mode` says what the fitted number does to the value a sample's params carry: "value" replaces it (the
+default), "factor" multiplies it (one water R2 factor over per-sample measured R2), "add" shifts it (a B0
+offset on top of a measured B0 map). The field "m_start" -- not a SimParams field -- is the magnetisation
+the sequence starts from, as a fraction of equilibrium; free, it rebuilds the start state from the
+current pools at every step. All of these need `fit_joint`; `fit` solves every sample alone, with
+plain values, and refuses them.
 """
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -35,12 +43,17 @@ class FreeParam:
     lo: float           # lower bound (physical units)
     hi: float           # upper bound (physical units)
     x0: float           # initial guess (physical units)
-    scope: str = "sample"                       # "sample": one value per sample; "shared": one for all of them
+    scope: str = "sample"                       # "sample" one per sample, "shared" one for all, "block" one per rung
     samples: Optional[Tuple[int, ...]] = None   # free only in these samples (None = all); the rest keep theirs
+    mode: str = "value"                         # "value" replaces, "factor" multiplies, "add" shifts the carried value
 
     def __post_init__(self):
-        if self.scope not in ("sample", "shared"):
-            raise ValueError(f"{self.name}: scope {self.scope!r}; use 'sample' or 'shared'")
+        if self.scope not in ("sample", "shared", "block"):
+            raise ValueError(f"{self.name}: scope {self.scope!r}; use 'sample', 'shared' or 'block'")
+        if self.mode not in ("value", "factor", "add"):
+            raise ValueError(f"{self.name}: mode {self.mode!r}; use 'value', 'factor' or 'add'")
+        if self.field == "m_start" and (self.index is not None or self.mode == "add"):
+            raise ValueError(f"{self.name}: m_start is one number per sample (index None), as a value or a factor")
         if self.samples is not None:
             object.__setattr__(self, "samples", tuple(sorted({int(i) for i in self.samples})))
             if not self.samples:
@@ -67,15 +80,18 @@ class FitSpec:
 
     @property
     def independent(self) -> bool:
-        """True when every parameter is one value per sample, free in every sample (what `fit` solves)."""
-        return all(s.scope == "sample" and s.samples is None for s in self.slots)
+        """True when every parameter is a plain value per sample, free in every sample (what `fit` solves)."""
+        return all(s.scope == "sample" and s.samples is None and s.mode == "value" and s.field != "m_start"
+                   for s in self.slots)
 
     def require_independent(self, caller: str) -> None:
         """Raise unless every sample can be fitted alone."""
         if not self.independent:
-            joint = [s.name for s in self.slots if s.scope != "sample" or s.samples is not None]
-            raise ValueError(f"{caller}: {joint} are shared or free in some samples only (FreeParam scope / "
-                             "samples), which samples fitted alone cannot do; use fit_joint")
+            joint = [s.name for s in self.slots if s.scope != "sample" or s.samples is not None
+                     or s.mode != "value" or s.field == "m_start"]
+            raise ValueError(f"{caller}: {joint} are shared, per block, free in some samples only, a factor / an "
+                             "offset, or m_start (FreeParam scope / samples / mode), which samples fitted alone "
+                             "with plain values cannot do; use fit_joint")
 
 
 def write_params(base: SimParams, x_scaled: jnp.ndarray, spec: FitSpec) -> SimParams:

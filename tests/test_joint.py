@@ -138,3 +138,71 @@ def test_levenberg_marquardt_holds_what_is_not_free():
     both = levenberg_marquardt(resid, x0, lo, hi, n_iter=30)
     ones = levenberg_marquardt(resid, x0, lo, hi, n_iter=30, free=jnp.array([1.0, 1.0]))
     np.testing.assert_array_equal(np.asarray(both), np.asarray(ones))
+
+
+# ---- factors, offsets, the start state, one value per experiment ---------------------------------------
+
+M_SHARED = FreeParam("m0", "m_start", None, scale=1.0, lo=0.1, hi=1.0, x0=0.9, scope="shared")
+R2_FACTOR = FreeParam("r2f", "water_r2", None, scale=1.0, lo=0.5, hi=1.5, x0=1.0, scope="shared", mode="factor")
+DB0 = FreeParam("db0", "b0_inhom", None, scale=0.01, lo=-0.1, hi=0.1, x0=0.0, scope="block", mode="add")
+
+
+def test_a_shared_factor_and_start_state_are_recovered(amide):
+    """Measured R2 per sample 25 % too high (truth = 0.8 x carried) and the sequence starting at 0.6 of
+    equilibrium: one factor and one start state, both found, with the carried R2 left per sample."""
+    p, jp, true, events, m0, z = amide
+    r2_true = jnp.asarray([16.0, 20.0, 24.0], true.water_r1.dtype)
+    true2 = true._replace(water_r2=r2_true)
+    one = lambda b, i: jax.tree.map(lambda a: a[i], b)
+    m06 = jnp.stack([initial_state(one(true2, i)) * 0.6 for i in range(3)])
+    z2 = jnp.stack([simulate_spectrum(one(true2, i), events, m06[i], return_full_trajectory=False)[:, p.mz_loc]
+                    for i in range(3)])
+    carried = true2._replace(water_r2=r2_true / 0.8)                       # what was "measured"
+    m_eq = jnp.stack([initial_state(one(carried, i)) for i in range(3)])   # the experiment assumes equilibrium
+    res = fit_joint(Experiment(carried, events, m_eq, p.mz_loc), FitSpec([K, F, R2_FACTOR, M_SHARED]), z2,
+                    n_iter=40)
+    assert res["r2f"][0] == pytest.approx(0.8, rel=5e-3)
+    assert res["m0"][0] == pytest.approx(0.6, rel=5e-3)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+
+
+def test_a_start_state_free_in_some_samples_only(amide):
+    """M_start 0.7 / 0.5 in samples 0 and 1 (fitted), sample 2 at the start state the experiment gives."""
+    p, jp, true, events, m0, z = amide
+    one = lambda b, i: jax.tree.map(lambda a: a[i], b)
+    ms = [0.7, 0.5, 1.0]
+    m_true = jnp.stack([initial_state(one(true, i)) * ms[i] for i in range(3)])
+    z2 = jnp.stack([simulate_spectrum(one(true, i), events, m_true[i], return_full_trajectory=False)[:, p.mz_loc]
+                    for i in range(3)])
+    m_each = FreeParam("m0", "m_start", None, scale=1.0, lo=0.1, hi=1.0, x0=0.9, samples=(0, 1))
+    res = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F, m_each]), z2, n_iter=40)
+    np.testing.assert_allclose(res["m0"][:2], [0.7, 0.5], rtol=5e-3)
+    assert res["m0"][2] == pytest.approx(1.0) and not res.free[2, 2]
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+
+
+def test_one_offset_per_experiment_is_recovered(amide):
+    """A B0 drift between the rungs (0, +0.03, -0.02, +0.01 ppm) on top of each sample's own B0."""
+    p, jp, true, events, m0, z = amide
+    own = jnp.asarray([0.0, 0.01, -0.01], true.water_r1.dtype)
+    drift = [0.0, 0.03, -0.02, 0.01]
+    n_per = PPM.size
+    one = lambda b, i: jax.tree.map(lambda a: a[i], b)
+    blocks = []
+    for b, d in enumerate(drift):
+        ev = jax.tree.map(lambda a: a[b * n_per:(b + 1) * n_per], events)
+        blocks.append(jnp.stack([simulate_spectrum(one(true, i)._replace(b0_inhom=own[i] + d), ev, m0[i],
+                                                   return_full_trajectory=False)[:, p.mz_loc] for i in range(3)]))
+    z2 = jnp.concatenate(blocks, axis=1)
+    res = fit_joint(Experiment(true._replace(b0_inhom=own), events, m0, p.mz_loc), FitSpec([K, F, DB0]), z2,
+                    n_iter=40, n_per_block=n_per)
+    np.testing.assert_allclose(res["db0"], drift, atol=2e-3)
+    assert np.isnan(res.x[:, 2]).all() and res.blocks["db0"]["sd"].shape == (4,)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+
+
+@pytest.mark.parametrize("extra", [R2_FACTOR, M_SHARED, DB0], ids=["factor", "m_start", "block"])
+def test_fit_refuses_factors_offsets_start_state_and_blocks(amide, extra):
+    p, jp, true, events, m0, z = amide
+    with pytest.raises(ValueError, match="fit_joint"):
+        fit(Experiment(true, events, m0, p.mz_loc), FitSpec([K, extra]), z)
