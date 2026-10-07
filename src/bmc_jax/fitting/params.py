@@ -10,9 +10,16 @@ on the raw values would take steps that are enormous in one and invisible in the
 
 Per-voxel B0 and B1 are fitted simply by listing "b0_inhom" and "rel_b1" as slots. They are real
 per-voxel parameters, not something baked into the sequence.
+
+`scope` and `samples` say how a parameter is spread over the samples of a fit. The default is what
+`fit` does: one value per sample, free in every sample. `scope="shared"` makes it ONE value for every
+sample it is free in -- a property the samples have in common, such as a scanner's field error or a
+relaxation factor of a common solvent. `samples=(0, 2)` frees it only in those samples; every other
+sample keeps the value its params carry, exactly -- a second pool that only some samples contain, or a
+pool size known in one sample. Both need `fit_joint`; `fit` solves every sample alone and refuses them.
 """
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import jax.numpy as jnp
@@ -28,6 +35,16 @@ class FreeParam:
     lo: float           # lower bound (physical units)
     hi: float           # upper bound (physical units)
     x0: float           # initial guess (physical units)
+    scope: str = "sample"                       # "sample": one value per sample; "shared": one for all of them
+    samples: Optional[Tuple[int, ...]] = None   # free only in these samples (None = all); the rest keep theirs
+
+    def __post_init__(self):
+        if self.scope not in ("sample", "shared"):
+            raise ValueError(f"{self.name}: scope {self.scope!r}; use 'sample' or 'shared'")
+        if self.samples is not None:
+            object.__setattr__(self, "samples", tuple(sorted({int(i) for i in self.samples})))
+            if not self.samples:
+                raise ValueError(f"{self.name}: samples=() frees it nowhere; leave it out of the spec")
 
 
 @dataclass(frozen=True)
@@ -47,6 +64,18 @@ class FitSpec:
     # scaled versions (what the optimiser actually works in)
     def to_scaled(self, x_phys): return np.asarray(x_phys) / np.array([s.scale for s in self.slots])
     def to_phys(self, x_scaled): return np.asarray(x_scaled) * np.array([s.scale for s in self.slots])
+
+    @property
+    def independent(self) -> bool:
+        """True when every parameter is one value per sample, free in every sample (what `fit` solves)."""
+        return all(s.scope == "sample" and s.samples is None for s in self.slots)
+
+    def require_independent(self, caller: str) -> None:
+        """Raise unless every sample can be fitted alone."""
+        if not self.independent:
+            joint = [s.name for s in self.slots if s.scope != "sample" or s.samples is not None]
+            raise ValueError(f"{caller}: {joint} are shared or free in some samples only (FreeParam scope / "
+                             "samples), which samples fitted alone cannot do; use fit_joint")
 
 
 def write_params(base: SimParams, x_scaled: jnp.ndarray, spec: FitSpec) -> SimParams:

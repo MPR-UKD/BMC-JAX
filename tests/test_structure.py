@@ -46,6 +46,7 @@ ALLOWED = {
     "fitting.residual": {"simulation", "fitting.params"},
     "fitting.independent": {"simulation", "fitting.params", "fitting.residual",
                             "fitting.lm", "fitting.experiment", "fitting.result"},
+    "fitting.joint":    {"simulation", "fitting.lm", "fitting.result"},
 }
 
 

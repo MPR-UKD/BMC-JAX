@@ -95,6 +95,7 @@ bmc_jax/
 │   ├── residual.py          what is compared
 │   ├── lm.py                bounded Levenberg–Marquardt, usable on its own
 │   ├── independent.py       every sample on its own: one spectrum, many voxels, or many GPUs
+│   ├── joint.py             samples together: shared values, values free in some samples only
 │   └── result.py            FitResult: values, residual per rung, bounds hit
 ├── io/                      Pulseq-CEST YAML, as plain frozen dataclasses
 ├── mrf/                     MR-fingerprinting dictionaries from the simulator
@@ -106,6 +107,30 @@ which pools exist and what they are called belongs to the model, not to the fitt
 
 `lm.py` does not import the simulation, so `levenberg_marquardt` is a general bounded least-squares
 routine you can use for anything. That boundary is enforced by a test, not by convention.
+
+### Fitting samples together
+
+`fit` solves every sample alone. When the samples have something in common, or a pool exists in only
+some of them, use `fit_joint` and say so in the spec:
+
+```python
+from bmc_jax.fitting import FitSpec, FreeParam, fit_joint
+
+spec = FitSpec([
+    FreeParam("k", "cest_k", 0, 100.0, 5.0, 2000.0, 300.0),                     # one per sample
+    FreeParam("f", "cest_f", 0, 0.001, 1e-5, 0.03, 0.005),
+    FreeParam("r2w", "water_r2", None, 1.0, 0.1, 5.0, 0.6, scope="shared"),     # one for all samples
+    FreeParam("f_noe", "cest_f", 1, 0.001, 0.0, 0.03, 0.002, samples=(0, 1)),   # only where it exists
+])
+res = fit_joint(ladder, spec, Z, n_per_block=len(ppm))
+res["r2w"], res.sd, res.free
+```
+
+Where a value is not free, the sample keeps what its params carry, exactly. The Jacobian is built per
+sample, for that sample's own parameters, so a shared value costs one more column, not another fit.
+Error bars (`res.sd`) and correlations (`res.corr`) come from the Jacobian at the solution, scaled by
+the misfit. With a plain spec `fit_joint` gives `fit`'s numbers, and `fit` refuses a spec it cannot
+honour rather than ignoring `scope` or `samples`.
 
 ### Two matrix exponentials
 
@@ -177,7 +202,7 @@ so fit in float32 and re-check anything that turns on a smaller difference with
 ## Tests
 
 ```bash
-pytest                    # 63 tests, plus the docstring examples
+pytest                    # 90 tests, the docstring examples included
 ```
 
 | | checks |
@@ -185,6 +210,7 @@ pytest                    # 63 tests, plus the docstring examples
 | `test_solver.py` | physics invariants of the forward model |
 | `test_experiment.py` | stacking experiments, and the padding that makes it safe |
 | `test_fitting.py` | simulate, then fit the parameters back |
+| `test_joint.py` | the same with shared values and a pool in some samples only; a plain spec gives `fit`'s numbers |
 | `test_config.py` | reading a Pulseq-CEST config |
 | `test_structure.py` | the package's own layering rules |
 

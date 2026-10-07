@@ -8,6 +8,10 @@ belong with the numbers.
 `at_bounds` is not a convenience. A parameter sitting on its bound is not a measurement: the
 optimiser wanted to go further and was not allowed to, so the value reported is the bound, not
 the data's answer. That has to be visible without anyone having to look for it.
+
+`fit_joint` fills in more: which values were free in which sample (`free`), error bars and correlations
+(`sd`, `corr`), the starting values (`x0`, so `unmoved` can say which values never left them) and the
+cost after every step. `fit` leaves them None.
 """
 from dataclasses import dataclass
 
@@ -33,6 +37,22 @@ class FitResult:
     n_per_block
         Offsets per experiment when several were stacked, so the residual can be reported per
         rung of a ladder. None when the fit was a single experiment.
+    free
+        (fit_joint) True where the fit set the value; elsewhere `x` is the value the sample's params
+        carry. None (fit): every value was fitted.
+    sd
+        (fit_joint) Standard deviations, physical units, NaN where not free. Scaled by the misfit
+        (s^2 = cost / (points - free values)): when the model and not the noise limits the fit, they
+        say how well the data pin a value down GIVEN the model, not how right the model is.
+    corr
+        (fit_joint) Correlations between one sample's free values, shape (n_samples, n_params,
+        n_params), NaN where not free. A shared value appears in every sample it is free in.
+    x0
+        (fit_joint) Starting values, physical units.
+    cost
+        (fit_joint) Sum of squared residuals after every LM step.
+    nan_steps
+        (fit_joint) LM steps rejected because the Jacobian had NaN / inf.
 
     Examples
     --------
@@ -49,6 +69,12 @@ class FitResult:
     z_meas: np.ndarray
     spec: FitSpec
     n_per_block: int | None = None
+    free: np.ndarray | None = None
+    sd: np.ndarray | None = None
+    corr: np.ndarray | None = None
+    x0: np.ndarray | None = None
+    cost: np.ndarray | None = None
+    nan_steps: int = 0
 
     @property
     def names(self) -> list[str]:
@@ -100,7 +126,20 @@ class FitResult:
         allowed range and could not, so the number reported is where the bound is.
         """
         lo, hi = np.asarray(self.spec.lo_phys), np.asarray(self.spec.hi_phys)
-        return np.isclose(self.x, lo) | np.isclose(self.x, hi)
+        railed = np.isclose(self.x, lo) | np.isclose(self.x, hi)
+        return railed if self.free is None else railed & self.free
+
+    @property
+    def unmoved(self) -> np.ndarray | None:
+        """Boolean mask like `x`: a free value still exactly at its start, or None without `x0`.
+
+        A value that never left its start accepted no step at all. With a NaN Jacobian or a start in a
+        flat corner, the number reported is the start, not a fit -- worth knowing before reading it.
+        """
+        if self.x0 is None:
+            return None
+        still = np.isclose(self.x, self.x0, rtol=1e-6, atol=0.0)
+        return still if self.free is None else still & self.free
 
     def summary(self) -> str:
         """A table of the fit, one row per sample, with railed values marked."""
@@ -109,11 +148,14 @@ class FitResult:
         for i in range(self.x.shape[0]):
             cells = []
             for j, _ in enumerate(self.names):
-                mark = "*" if self.at_bounds[i, j] else " "
+                mark = "*" if self.at_bounds[i, j] else ("=" if self.free is not None and not self.free[i, j]
+                                                        else " ")
                 cells.append(f"{self.x[i, j]:>11.5g}{mark}")
             rows.append(f"{i:>6}  " + "  ".join(cells) + f"  {self.rms[i]:>9.2e}")
         if self.at_bounds.any():
             rows.append("* on a bound -- not a measurement, the optimiser was stopped there")
+        if self.free is not None and not self.free.all():
+            rows.append("= not free in this sample: the value its params carry")
         return "\n".join(rows)
 
     def __repr__(self) -> str:

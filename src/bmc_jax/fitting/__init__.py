@@ -5,6 +5,7 @@
     residual.py     WHAT is compared                 (residual_one, residual_batch)
     lm.py           HOW it is minimised              (levenberg_marquardt)
     independent.py  every sample on its own          (fit, fit_one, fit_batch, fit_batch_sharded, fit_batch_adam)
+    joint.py        samples together                 (fit_joint: shared values, values free in some samples only)
     result.py       WHAT comes back                  (FitResult)
 
 One-directional imports, and one rule worth stating out loud: `lm.py` must not import the simulation.
@@ -24,6 +25,7 @@ from .params import FitSpec, FreeParam, write_params
 from .residual import residual_one, residual_batch
 from .lm import levenberg_marquardt
 from .independent import fit, fit_one, fit_batch, fit_batch_sharded, fit_batch_adam
+from .joint import fit_joint
 from .result import FitResult
 
 __all__ = [
@@ -32,5 +34,6 @@ __all__ = [
     "residual_one", "residual_batch",
     "levenberg_marquardt",                             # bounded LM, usable standalone
     "fit", "FitResult",                                # the entry point to prefer
+    "fit_joint",                                       # shared / partly free parameters
     "fit_one", "fit_batch", "fit_batch_sharded", "fit_batch_adam",
 ]

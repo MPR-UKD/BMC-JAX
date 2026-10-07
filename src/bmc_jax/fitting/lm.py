@@ -18,7 +18,8 @@ import jax
 import jax.numpy as jnp
 
 @partial(jax.jit, static_argnames=["resid_fn", "n_iter", "use_fwd", "return_trajectory"])
-def levenberg_marquardt(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=False, return_trajectory=False):
+def levenberg_marquardt(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=False, return_trajectory=False,
+                        free=None):
     """Damped Gauss-Newton (LM) for ONE voxel, fixed iterations with accept/reject.
     Bounds enforced by clipping the step. Pure JAX -> vmappable.
 
@@ -30,7 +31,11 @@ def levenberg_marquardt(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=Fals
     return_trajectory=True also returns (X_traj (n_iter, P) scaled, C_traj (n_iter,) cost) -- the
     per-iteration parameter + cost path. Used by benchmark_lm_convergence to check that the fixed
     n_iter is enough (the LM has no gtol/ftol). The scan already carried the cost as its stacked
-    output; this just also stacks x, so it is nearly free (n_iter x P extra)."""
+    output; this just also stacks x, so it is nearly free (n_iter x P extra).
+
+    free (optional, shape (P,), 1.0 / 0.0): a 0 entry is held at x0 -- its step is exactly zero whatever
+    the damping (fit_joint, for a parameter that is free in some samples only). None = all free, and
+    the arithmetic is exactly what it was without the argument."""
     jacfn = (jax.jacfwd if use_fwd else jax.jacrev)(resid_fn)
     P = x0.shape[0]
     eye = jnp.eye(P, dtype=x0.dtype)             # match x0 precision (else x64 forces float64 here)
@@ -40,9 +45,13 @@ def levenberg_marquardt(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=Fals
         r = resid_fn(x)
         c = jnp.sum(r ** 2)
         J = jacfn(x)
+        if free is not None:                     # a held entry: no Jacobian column (so no coupling) ...
+            J = J * free
         g = J.T @ r
         H = J.T @ J
         A = H + lam * (jnp.diag(jnp.diag(H)) + 1e-9 * eye)
+        if free is not None:                     # ... and a unit diagonal: its step is exactly zero
+            A = A + jnp.diag(1.0 - free)
         delta = jnp.linalg.solve(A, -g)
         x_new = jnp.clip(x + delta, lo, hi)
         c_new = jnp.sum(resid_fn(x_new) ** 2)

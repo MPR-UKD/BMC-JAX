@@ -27,6 +27,7 @@ from .experiment import Experiment
 from .result import FitResult
 
 def fit_one(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=True, dtype=None):
+    spec.require_independent("fit_one")
     from scipy.optimize import least_squares
     base, events, M0 = _cast_problem(base, events, M0, dtype)
     if dtype is not None:
@@ -65,6 +66,7 @@ def fit_batch(base, events, M0_batch, water_z, spec, z_meas_batch,
     so peak GPU memory stays bounded regardless of N_voxels. None = one shot (old behaviour).
     dtype -> if set (jnp.float32/float64), cast the whole problem to that precision and fit at it
     (used by the accuracy benchmarks to compare fp32 vs fp64 in one x64-enabled run)."""
+    spec.require_independent("fit_batch")
     n_vox = z_meas_batch.shape[0]
     # per-voxel residual: close over each voxel's measured spectrum
     base_b = base if base_batched else tile_params(base, n_vox)
@@ -144,6 +146,7 @@ def fit_batch_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
     raise it for light (block-pulse) problems to reduce loop overhead. n_devices=None uses every
     visible GPU; with one device this is just fit_batch chunked to `per_device_chunk`.
     use_fwd (default None) auto-selects the forward-mode Jacobian for tall residuals, as elsewhere."""
+    spec.require_independent("fit_batch_sharded")
     from ..simulation.multigpu import sharded_vmap, pick_devices
 
     if len(pick_devices(n_devices)) <= 1:            # single GPU -> the chunked single-device path
@@ -184,6 +187,7 @@ def fit_batch_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
 
 def fit_batch_adam(base, events, M0_batch, water_z, spec, z_meas_batch,
                      X0_phys=None, n_steps=400, lr=2e-2, skip_first=True):
+    spec.require_independent("fit_batch_adam")
     import optax
     resid = residual_batch(base, events, M0_batch, water_z, spec,
                                   z_meas_batch, skip_first)
@@ -270,6 +274,7 @@ def fit(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **k
     >>> res = fit(Experiment.stack(ladder), spec, Z, n_per_block=len(ppm))
     >>> print(res.summary())
     """
+    spec.require_independent("fit")
     z = jnp.atleast_2d(jnp.asarray(z_meas))
     n = z.shape[0]
 
