@@ -6,7 +6,7 @@ the parameter then cannot be fitted, and nothing says so -- the optimiser simply
 starting value back. Only the genuinely discrete field (mt_lineshape) stays
 integer.
 
-`convert_params` is duck-typed on purpose. It reads attributes and never checks a class, so any
+`to_sim_params` is duck-typed on purpose. It reads attributes and never checks a class, so any
 object exposing water_pool, cest_pools, mt_pool, system and options works: bmc_jax.io's
 dataclasses, a bmctool Parameters, or something of your own.
 """
@@ -15,7 +15,7 @@ dataclasses, a bmctool Parameters, or something of your own.
 from typing import NamedTuple, Optional, Any
 import jax.numpy as jnp
 
-class JAXParams(NamedTuple):
+class SimParams(NamedTuple):
     """
     JAX-compatible container for BMC simulation parameters.
     
@@ -48,9 +48,9 @@ class JAXParams(NamedTuple):
     b0_inhom: jnp.ndarray  # B0 inhomogeneity [ppm]
     rel_b1: jnp.ndarray    # Relative B1 field (scaling factor)
 
-def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXParams:
+def to_sim_params(params: Any, max_cest_pools: Optional[int] = None) -> SimParams:
     """
-    Converts a bmctool Parameters object into a JAX-compatible JAXParams NamedTuple.
+    Converts a bmctool Parameters object into a JAX-compatible SimParams NamedTuple.
     
     Args:
         params: The bmctool Parameters object (or similar object with water_pool, cest_pools, etc).
@@ -58,7 +58,7 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
                         This is useful for JIT compilation to maintain static shapes.
     
     Returns:
-        JAXParams: The JAX-friendly parameter structure.
+        SimParams: The JAX-friendly parameter structure.
         
     Raises:
         ValueError: If max_cest_pools is smaller than the actual number of pools.
@@ -130,7 +130,7 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
     b0_inhom = jnp.asarray(params.system.b0_inhom, dtype=float)
     rel_b1 = jnp.asarray(params.system.rel_b1, dtype=float)
     
-    return JAXParams(
+    return SimParams(
         water_r1=water_r1,
         water_r2=water_r2,
         water_f=water_f,
@@ -151,14 +151,14 @@ def convert_params(params: Any, max_cest_pools: Optional[int] = None) -> JAXPara
         rel_b1=rel_b1,
     )
 
-def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.ndarray:
+def initial_state(jax_params: SimParams, m_start: float = 1.0) -> jnp.ndarray:
     """Build the starting magnetisation vector.
 
     Parameters
     ----------
     jax_params
         The parameters the state vector must match in size and dtype.
-    scale
+    m_start
         Longitudinal magnetisation at the start of saturation, as a fraction of equilibrium.
         1.0 is thermal equilibrium.
 
@@ -169,7 +169,7 @@ def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.
 
     Notes
     -----
-    `scale` below 1.0 is not a fudge factor. A sequence that reads out repeatedly does not let
+    `m_start` below 1.0 is not a fudge factor. A sequence that reads out repeatedly does not let
     the magnetisation recover fully before the next saturation block, so saturation begins from a
     reduced state. Assuming equilibrium instead puts the whole simulated Z-spectrum too high, and
     a fit will absorb that offset into whatever parameter is free -- usually the pool size.
@@ -179,7 +179,7 @@ def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.
     model a smaller sample, which is a different thing entirely.
 
     THE MT POOL IS SCALED TOO, matching the reference implementation of the Pulseq-CEST format.
-    An argument can be made either way on physics -- `scale` describes what the readout left
+    An argument can be made either way on physics -- `m_start` describes what the readout left
     behind, and whether a semi-solid pool is depleted along with water is not obvious -- but the
     field belongs to a published format, so it has to mean what that format's reference says it
     means. The choice is not cosmetic: with an MT pool present the two conventions differ by up
@@ -206,7 +206,23 @@ def get_initial_magnetization(jax_params: JAXParams, scale: float = 1.0) -> jnp.
 
     # Scale every populated slot, the MT pool included. The transverse components are zero, so
     # in practice this is water Mz, the CEST pools' Mz and the MT pool.
-    if scale != 1.0:
-        M_init = M_init * scale
+    if m_start != 1.0:
+        M_init = M_init * m_start
 
     return M_init
+
+
+def cast_params(params: SimParams, dtype) -> SimParams:
+    """Recursively cast SimParams fields to dtype if they are floating point arrays."""
+    new_fields = {}
+    for field in params._fields:
+        val = getattr(params, field)
+        if hasattr(val, 'dtype') and (jnp.issubdtype(val.dtype, jnp.floating) or jnp.issubdtype(val.dtype, float)):
+              arr = jnp.array(val)
+              new_fields[field] = arr.astype(dtype)
+        elif isinstance(val, (float, int)) and not isinstance(val, bool):
+             arr = jnp.array(val, dtype=dtype)
+             new_fields[field] = arr
+        else:
+             new_fields[field] = val
+    return type(params)(**new_fields)

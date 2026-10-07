@@ -1,4 +1,4 @@
-"""The Bloch-McConnell matrix, and one time step of it.
+"""The Bloch-McConnell matrix (the time step is in expm.py since 2026-10-07).
 
 Renamed from `solver.py`, which described nothing that is in here and had already misled the
 project documentation into calling it "gradient-based parameter fitting". There is no fitting in
@@ -20,7 +20,7 @@ step over the singularity at the magic angle u = 1/sqrt(3).
 import jax
 import jax.numpy as jnp
 from typing import Tuple
-from .param_adapter import JAXParams
+from .params import SimParams
 
 # Pre-compute SuperLorentzian constants to aid JIT constant folding
 _SL_U = jnp.linspace(0.0, 1.0, 101)
@@ -59,7 +59,7 @@ def _interpolate_chs(delta_omega, t2, w0):
     
     return h0 * py1 + h1 * py2 + h2 * d0y + h3 * d1y
 
-def get_super_lorentzian_lineshape(delta_omega: float, t2: float, w0: float) -> float:
+def super_lorentzian(delta_omega: float, t2: float, w0: float) -> float:
     return jax.lax.cond(
         jnp.abs(delta_omega) >= w0,
         lambda _: _interpolate_sl(delta_omega, t2),
@@ -67,7 +67,7 @@ def get_super_lorentzian_lineshape(delta_omega: float, t2: float, w0: float) -> 
         operand=None
     )
 
-def get_lorentzian_lineshape(delta_omega: float, t2: float) -> float:
+def lorentzian(delta_omega: float, t2: float) -> float:
     """
     Calculates the Lorentzian lineshape value.
     
@@ -80,14 +80,14 @@ def get_lorentzian_lineshape(delta_omega: float, t2: float) -> float:
     """
     return t2 / (1 + (delta_omega * t2)**2)
 
-def build_bmc_matrix_and_vector(params: JAXParams, rf_amp: float, rf_phase: float, rf_freq: float) -> Tuple[jnp.ndarray, jnp.ndarray]:
+def bmc_matrix(params: SimParams, rf_amp: float, rf_phase: float, rf_freq: float) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
     Constructs the Bloch-McConnell matrix (A) and constant vector (C) for a given time step.
     
     The system is defined as dM/dt = A * M + C.
     
     Args:
-        params: JAXParams object containing physical parameters.
+        params: SimParams object containing physical parameters.
         rf_amp: RF amplitude in Hz (gamma * B1 / 2pi).
         rf_phase: RF phase in radians.
         rf_freq: RF frequency offset in Hz.
@@ -176,7 +176,7 @@ def build_bmc_matrix_and_vector(params: JAXParams, rf_amp: float, rf_phase: floa
     t2_mt = 1.0 / r2_mt
     
     # Use SuperLorentzian lineshape
-    # g_mt = get_super_lorentzian_lineshape(off_mt, t2_mt)
+    # g_mt = super_lorentzian(off_mt, t2_mt)
     
     # Select lineshape based on params.mt_lineshape
     # 0=None, 1=Lorentzian, 2=SuperLorentzian
@@ -184,10 +184,10 @@ def build_bmc_matrix_and_vector(params: JAXParams, rf_amp: float, rf_phase: floa
         return jnp.array(0.0, dtype=off.dtype)
         
     def get_lor(off, t2):
-        return get_lorentzian_lineshape(off, t2).astype(off.dtype)
+        return lorentzian(off, t2).astype(off.dtype)
         
     def get_sl(off, t2):
-        return get_super_lorentzian_lineshape(off, t2, larmor_freq * 1e-6).astype(off.dtype)
+        return super_lorentzian(off, t2, larmor_freq * 1e-6).astype(off.dtype)
 
     # Conditional computation routing. 
     # Bypasses complex SuperLorentzian approximations locally when MT pools are excluded.
@@ -293,23 +293,3 @@ def build_bmc_matrix_and_vector(params: JAXParams, rf_amp: float, rf_phase: floa
     C = C.at[iz_mt].set(r1_mt * f_mt)
     
     return A, C
-
-def solve_step(M: jnp.ndarray, dt: float, A: jnp.ndarray, C: jnp.ndarray) -> jnp.ndarray:
-    """
-    Solves the linear ODE dM/dt = A*M + C for a single time step dt.
-    """
-    size = M.shape[0]
-    
-    # Construct augmented matrix (N+1, N+1)
-    aug_A = jnp.zeros((size + 1, size + 1), dtype=A.dtype)
-    aug_A = aug_A.at[:size, :size].set(A)
-    aug_A = aug_A.at[:size, size].set(C)
-    
-    # Compute matrix exponential
-    exp_aug = jax.scipy.linalg.expm(aug_A * dt)
-    
-    # Propagate state
-    M_aug = jnp.append(M, 1.0)
-    M_new_aug = exp_aug @ M_aug
-    
-    return M_new_aug[:size]

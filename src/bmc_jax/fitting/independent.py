@@ -1,12 +1,12 @@
-"""batching.py -- the same fit, over one spectrum, many voxels, or many GPUs.
+"""independent.py (formerly batching.py) -- every sample fitted on its own: one spectrum, many voxels, or many GPUs.
 
 These four entry points differ in exactly two ways: which optimiser runs, and how the work is
-spread. `fit_voxel` is one spectrum on the CPU via scipy; `fit_phantom_lm` vmaps the JAX LM over
-every voxel; `fit_phantom_lm_sharded` splits that batch across the local GPUs; `fit_phantom_adam`
+spread. `fit_one` is one spectrum on the CPU via scipy; `fit_batch` vmaps the JAX LM over
+every voxel; `fit_batch_sharded` splits that batch across the local GPUs; `fit_batch_adam`
 replaces LM with one Adam loop over the whole phantom.
 
-That is a two-by-two grid written out as four functions, and a later step folds it into
-`fit(..., optimizer=, batch=)`. The four names stay exported regardless.
+That is a two-by-two grid written out as four functions; `fit` is the entry point to prefer.
+Fits that SHARE parameters across samples are in joint.py.
 
 `max_chunk` is the knob that matters in practice: vmapping over every voxel at once allocates
 for every voxel at once, and a large phantom will exhaust the card. Chunking bounds peak memory
@@ -16,21 +16,22 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from ..jax_solver.simulator import simulate_spectrum
-from ..jax_solver.voxel_simulator import simulate_voxels, tile_params, extract_z_spectra
-from ..jax_solver.utils import cast_params_to_dtype, cast_events_to_dtype
-from .spec import FitSpec, Slot, apply_x
-from .residual import _cast_problem, make_single_residual, make_phantom_residual
-from .optimize import _lm_one, c_out_select, lm_minimize
+from ..simulation.simulate import simulate_spectrum
+from ..simulation.voxels import simulate_voxels, tile_params, extract_z_spectra
+from ..simulation.params import cast_params
+from ..simulation.events import cast_events
+from .params import FitSpec, FreeParam, write_params
+from .residual import _cast_problem, residual_one, residual_batch
+from .lm import levenberg_marquardt, c_out_select
 from .experiment import Experiment
 from .result import FitResult
 
-def fit_voxel(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=True, dtype=None):
+def fit_one(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=True, dtype=None):
     from scipy.optimize import least_squares
     base, events, M0 = _cast_problem(base, events, M0, dtype)
     if dtype is not None:
         z_meas = jnp.asarray(z_meas).astype(dtype)
-    resid = make_single_residual(base, events, M0, water_z, spec, z_meas, skip_first)
+    resid = residual_one(base, events, M0, water_z, spec, z_meas, skip_first)
     rj = jax.jit(resid)
     jj = jax.jit(jax.jacrev(resid))
     castx = (lambda x: jnp.asarray(x, dtype)) if dtype is not None else (lambda x: jnp.asarray(x))
@@ -46,7 +47,7 @@ def fit_voxel(base, events, M0, water_z, spec, z_meas, x0_phys=None, skip_first=
     return spec.to_phys(res.x), res
 
 
-def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
+def fit_batch(base, events, M0_batch, water_z, spec, z_meas_batch,
                    X0_phys=None, n_iter=40, skip_first=True, base_batched=False,
                    use_fwd=None, max_chunk=None, dtype=None):
     """Fit every voxel with damped Gauss-Newton, all voxels in parallel (vmap).
@@ -57,7 +58,7 @@ def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
     WASSR B0 -> b0_inhom, WASABI -> rel_b1) are honoured instead of being overwritten by
     a single shared value. Fields listed in `spec` are still fit per voxel on top of it.
 
-    use_fwd -> forward-mode Jacobian (see _lm_one; identical result). Default None AUTO-selects
+    use_fwd -> forward-mode Jacobian (see levenberg_marquardt; identical result). Default None AUTO-selects
     it whenever the residual is tall (offsets >= params), which is always true for CEST -> far
     less memory and usually faster. Pass True/False to force.
     max_chunk -> if set, fit at most this many voxels per vmap call (looping + concatenating),
@@ -68,8 +69,8 @@ def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
     # per-voxel residual: close over each voxel's measured spectrum
     base_b = base if base_batched else tile_params(base, n_vox)
     if dtype is not None:                        # run the whole fit at this precision
-        base_b = cast_params_to_dtype(base_b, dtype)
-        events = cast_events_to_dtype(events, dtype)
+        base_b = cast_params(base_b, dtype)
+        events = cast_events(events, dtype)
         M0_batch = M0_batch.astype(dtype)
         z_meas_batch = jnp.asarray(z_meas_batch).astype(dtype)
     Z_t = jnp.asarray(z_meas_batch[:, 1:] if skip_first else z_meas_batch)
@@ -96,7 +97,7 @@ def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
 
     def resid_for(base_v, z_t_v, m0_v):
         def r(x_scaled):
-            params = apply_x(base_v, x_scaled, spec)
+            params = write_params(base_v, x_scaled, spec)
             z = simulate_spectrum(params, events, m0_v, return_full_trajectory=False)[:, water_z]
             zc = z[1:] if skip_first else z
             return zc - z_t_v
@@ -113,7 +114,7 @@ def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
         lo, hi, X0 = lo.astype(dtype), hi.astype(dtype), X0.astype(dtype)
 
     def solve_one(base_v, z_t_v, x0, m0_v):
-        return _lm_one(resid_for(base_v, z_t_v, m0_v), x0, lo, hi, n_iter=n_iter, use_fwd=use_fwd)
+        return levenberg_marquardt(resid_for(base_v, z_t_v, m0_v), x0, lo, hi, n_iter=n_iter, use_fwd=use_fwd)
     solve_batch = jax.vmap(solve_one, in_axes=(0, 0, 0, 0))
 
     if not max_chunk or n_vox <= max_chunk:
@@ -126,11 +127,11 @@ def fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
     return np.asarray(Xf) * scales               # physical (N, P)
 
 
-def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
+def fit_batch_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
                            n_iter=40, skip_first=True, n_devices=None, base_batched=False,
                            use_fwd=None, per_device_chunk=256):
-    """Same damped Gauss-Newton fit as fit_phantom_lm, but the voxel axis is SPLIT across
-    all local GPUs via jax.jit + NamedSharding (see jax_solver.sharded.sharded_vmap).
+    """Same damped Gauss-Newton fit as fit_batch, but the voxel axis is SPLIT across
+    all local GPUs via jax.jit + NamedSharding (see simulation.multigpu.sharded_vmap).
 
     This replaces the earlier jax.pmap implementation. pmap pinned each device's batch at
     total/n_dev and OOM'd when that was too big (and its 1-GPU fallback fit every voxel in one
@@ -141,12 +142,12 @@ def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
 
     per_device_chunk defaults small (256) because real fits are the heavy PULSED 607-offset kind;
     raise it for light (block-pulse) problems to reduce loop overhead. n_devices=None uses every
-    visible GPU; with one device this is just fit_phantom_lm chunked to `per_device_chunk`.
+    visible GPU; with one device this is just fit_batch chunked to `per_device_chunk`.
     use_fwd (default None) auto-selects the forward-mode Jacobian for tall residuals, as elsewhere."""
-    from jax_solver.sharded import sharded_vmap, pick_devices   # core primitive (mirrored to all images)
+    from ..simulation.multigpu import sharded_vmap, pick_devices
 
     if len(pick_devices(n_devices)) <= 1:            # single GPU -> the chunked single-device path
-        return fit_phantom_lm(base, events, M0_batch, water_z, spec, z_meas_batch,
+        return fit_batch(base, events, M0_batch, water_z, spec, z_meas_batch,
                               n_iter=n_iter, skip_first=skip_first, base_batched=base_batched,
                               use_fwd=use_fwd, max_chunk=per_device_chunk)
 
@@ -154,7 +155,7 @@ def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
     scales = np.array([s.scale for s in spec.slots])
     base_b = base if base_batched else tile_params(base, n_vox)
     Z_t = jnp.asarray(z_meas_batch[:, 1:] if skip_first else z_meas_batch)
-    # Same per-voxel M0 fix as in fit_phantom_lm above -- see the note there.
+    # Same per-voxel M0 fix as in fit_batch above -- see the note there.
     M0_b = jnp.asarray(M0_batch)
     if M0_b.ndim == 1:
         M0_b = jnp.broadcast_to(M0_b, (n_vox,) + M0_b.shape)
@@ -166,14 +167,14 @@ def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
     hi = jnp.asarray(spec.hi_phys / scales)
     X0 = jnp.broadcast_to(jnp.asarray(spec.to_scaled(spec.x0_phys)), (n_vox, spec.n))
 
-    # identical per-voxel solve to fit_phantom_lm; sharded_vmap partitions the batch axis for us.
+    # identical per-voxel solve to fit_batch; sharded_vmap partitions the batch axis for us.
     def solve_one(base_v, z_t_v, x0, m0_v):
         def r(x_scaled):
-            params = apply_x(base_v, x_scaled, spec)
+            params = write_params(base_v, x_scaled, spec)
             zz = simulate_spectrum(params, events, m0_v, return_full_trajectory=False)[:, water_z]
             zc = zz[1:] if skip_first else zz
             return zc - z_t_v
-        return _lm_one(r, x0, lo, hi, n_iter=n_iter, use_fwd=use_fwd)
+        return levenberg_marquardt(r, x0, lo, hi, n_iter=n_iter, use_fwd=use_fwd)
     solve_batch = jax.vmap(solve_one, in_axes=(0, 0, 0, 0))
 
     Xf = sharded_vmap(solve_batch, base_b, Z_t, X0, M0_b,
@@ -181,10 +182,10 @@ def fit_phantom_lm_sharded(base, events, M0_batch, water_z, spec, z_meas_batch,
     return Xf * scales                               # physical (n_vox, P)
 
 
-def fit_phantom_adam(base, events, M0_batch, water_z, spec, z_meas_batch,
+def fit_batch_adam(base, events, M0_batch, water_z, spec, z_meas_batch,
                      X0_phys=None, n_steps=400, lr=2e-2, skip_first=True):
     import optax
-    resid = make_phantom_residual(base, events, M0_batch, water_z, spec,
+    resid = residual_batch(base, events, M0_batch, water_z, spec,
                                   z_meas_batch, skip_first)
     n_vox = z_meas_batch.shape[0]
     lo = jnp.asarray(spec.lo_phys / np.array([s.scale for s in spec.slots]))
@@ -239,7 +240,7 @@ def fit(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **k
     n_per_block
         Offsets per experiment, so the result can report the residual per rung of a ladder.
     **kwargs
-        Passed through to :func:`fit_phantom_lm` (`max_chunk`, `dtype`, `use_fwd`, ...).
+        Passed through to :func:`fit_batch` (`max_chunk`, `dtype`, `use_fwd`, ...).
 
     Returns
     -------
@@ -255,11 +256,11 @@ def fit(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **k
 
     So float32 fitting of an exchange rate is reproducible to about a percent, and that floor is
     set by conditioning rather than by the data. If a conclusion turns on a smaller difference,
-    refit with :func:`bmc_jax.precision.configure_x64` enabled and check it survives.
+    refit with :func:`bmc_jax.settings.use_x64` enabled and check it survives.
 
     Notes
     -----
-    This wraps `fit_phantom_lm`, which remains available and unchanged. The difference is that
+    This wraps `fit_batch`, which remains available and unchanged. The difference is that
     the state-vector index, the batching of the parameters and the shape handling come from the
     `Experiment` rather than from the caller.
 
@@ -281,12 +282,12 @@ def fit(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, **k
     if m0.ndim == 1:
         m0 = jnp.broadcast_to(m0, (n,) + m0.shape)
 
-    X = np.asarray(fit_phantom_lm(base, experiment.events, m0, experiment.mz_loc, spec, z,
+    X = np.asarray(fit_batch(base, experiment.events, m0, experiment.mz_loc, spec, z,
                                   X0_phys=x0_phys, n_iter=n_iter, skip_first=False,
                                   base_batched=True, **kwargs))
 
     xs = spec.to_scaled(X)
     z_fit = np.asarray(jax.vmap(lambda b, x, s: simulate_spectrum(
-        apply_x(b, jnp.asarray(x), spec), experiment.events, s,
+        write_params(b, jnp.asarray(x), spec), experiment.events, s,
         return_full_trajectory=False)[:, experiment.mz_loc])(base, jnp.asarray(xs), m0))
     return FitResult(X, z_fit, np.asarray(z), spec, n_per_block)

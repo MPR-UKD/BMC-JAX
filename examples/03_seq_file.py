@@ -11,14 +11,15 @@ import numpy as np
 import pypulseq as pp
 
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization, simulate_spectrum
-from bmc_jax.jax_solver.seq_adapter import convert_sequence_batch
+from bmc_jax.simulation import to_sim_params, initial_state, simulate_spectrum
+from bmc_jax.sequences import cw_saturation
+from bmc_jax.sequences.pulseq import events_from_seq_batch
 
 print(__doc__)
 
 params = example_config("amide")
-jax_params = convert_params(params)
-m0 = get_initial_magnetization(jax_params)
+jax_params = to_sim_params(params)
+m0 = initial_state(jax_params)
 
 PPM = np.linspace(-6.0, 6.0, 25)
 B1_UT = 1.0
@@ -30,7 +31,7 @@ hz_per_ppm = GAMMA_HZ_PER_T * params.system.b0 / 1e6
 # 1. Write a .seq
 # ---------------------------------------------------------------------------------------------
 # One saturation block per offset, each followed by an ADC. The ADC is what marks the end of an
-# offset: convert_sequence_batch splits the sequence on ADC events, giving one row per offset
+# offset: events_from_seq_batch splits the sequence on ADC events, giving one row per offset
 # that vmap can run in parallel.
 
 system = pp.Opts(rf_ringdown_time=0, rf_dead_time=0, rf_raster_time=1e-6)
@@ -60,7 +61,7 @@ print(f"wrote 03_saturation.seq -- {len(PPM)} offsets, B1 {B1_UT} uT, Tsat {TSAT
 
 seq_in = pp.Sequence(system=system)
 seq_in.read("03_saturation.seq")
-events, n_offsets = convert_sequence_batch(seq_in, max_pulse_samples=params.options.max_pulse_samples)
+events, n_offsets = events_from_seq_batch(seq_in, max_pulse_samples=params.options.max_pulse_samples)
 print(f"read back: {n_offsets} offsets x {events.dt.shape[1]} events per offset")
 
 z_from_seq = np.asarray(simulate_spectrum(jax_params, events, m0,

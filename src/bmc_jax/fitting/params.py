@@ -1,7 +1,7 @@
-"""spec.py -- declare WHICH parameters are free, and write a solution back into them.
+"""params.py (formerly spec.py) -- declare WHICH parameters are free, and write a solution back into them.
 
 This is the whole configuration surface of the fitter. Nothing here knows about GAG, amide,
-NOE or any other agent: a Slot names a JAXParams field and a pool index, and everything else --
+NOE or any other agent: a FreeParam names a SimParams field and a pool index, and everything else --
 which pools exist, how many, what they are called -- lives in the model, not in the fitter.
 
 `scale` matters more than it looks. The optimiser works in SCALED units so that every parameter
@@ -17,12 +17,12 @@ from typing import List, Optional
 import numpy as np
 import jax.numpy as jnp
 
-from ..jax_solver.param_adapter import JAXParams
+from ..simulation.params import SimParams
 
 @dataclass(frozen=True)
-class Slot:
+class FreeParam:
     name: str           # human label, e.g. "gag_k"
-    field: str          # JAXParams field, e.g. "cest_k", "cest_f", "b0_inhom", "rel_b1"
+    field: str          # SimParams field, e.g. "cest_k", "cest_f", "b0_inhom", "rel_b1"
     index: Optional[int] # pool index for array fields (cest_*); None for scalar fields
     scale: float        # rough magnitude, so the optimiser sees O(1) numbers
     lo: float           # lower bound (physical units)
@@ -32,7 +32,7 @@ class Slot:
 
 @dataclass(frozen=True)
 class FitSpec:
-    slots: List[Slot]
+    slots: List[FreeParam]
 
     @property
     def n(self):                 return len(self.slots)
@@ -49,7 +49,7 @@ class FitSpec:
     def to_phys(self, x_scaled): return np.asarray(x_scaled) * np.array([s.scale for s in self.slots])
 
 
-def apply_x(base: JAXParams, x_scaled: jnp.ndarray, spec: FitSpec) -> JAXParams:
+def write_params(base: SimParams, x_scaled: jnp.ndarray, spec: FitSpec) -> SimParams:
     """x_scaled -> physical -> written into the named slots. Pure JAX; safe under vmap."""
     dt = base.water_r1.dtype                      # match the params' dtype (fp32/fp64)
     x_phys = (x_scaled * spec.scales).astype(dt)

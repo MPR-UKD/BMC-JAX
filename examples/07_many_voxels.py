@@ -12,15 +12,15 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from bmc_jax.fitting import FitSpec, Experiment, Slot, fit
+from bmc_jax.fitting import FitSpec, Experiment, FreeParam, fit
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import (convert_params, cw_saturation, get_initial_magnetization,
-                                simulate_spectrum, tile_params)
+from bmc_jax.simulation import to_sim_params, initial_state, simulate_spectrum, tile_params
+from bmc_jax.sequences import cw_saturation
 
 print(__doc__)
 
 params = example_config("amide")
-jax_params = convert_params(params)
+jax_params = to_sim_params(params)
 ppm = np.linspace(-6.0, 6.0, 31)
 N = 16 * 16                                   # a small "slice"
 NOISE = 0.003
@@ -46,10 +46,10 @@ base = base._replace(cest_k=jnp.asarray(k_true[:, None]),
 ladder_b1 = (0.5, 1.0, 2.0)
 events = Experiment.stack([
     Experiment(jax_params, cw_saturation(ppm, b1_uT=b, tsat_s=2.0, b0_T=params.system.b0),
-            get_initial_magnetization(jax_params), params.mz_loc)
+            initial_state(jax_params), params.mz_loc)
     for b in ladder_b1]).events
 
-m0 = jnp.stack([get_initial_magnetization(jax.tree.map(lambda a, i=i: a[i], base))
+m0 = jnp.stack([initial_state(jax.tree.map(lambda a, i=i: a[i], base))
                 for i in range(N)])
 Z = np.stack([np.asarray(simulate_spectrum(jax.tree.map(lambda a, i=i: a[i], base), events,
                                            m0[i], return_full_trajectory=False))[:, params.mz_loc]
@@ -70,8 +70,8 @@ fit_base = tile_params(jax_params, N)._replace(
     water_r1=jnp.asarray(1.0 / t1_true))
 problem = Experiment(fit_base, events, m0, params.mz_loc)
 
-spec = FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=300.0),
-                Slot("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0005)])
+spec = FitSpec([FreeParam("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=300.0),
+                FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0005)])
 
 t0 = time.time()
 res = fit(problem, spec, Z, n_iter=40, n_per_block=len(ppm))
@@ -113,11 +113,11 @@ print("""
 
   What to take from it: float32 fitting of k and f is reproducible to about a percent on this
   kind of problem, and that is a floor set by conditioning, not by the data. If a conclusion
-  depends on a difference smaller than that, refit with bmc_jax.precision.configure_x64(True)
+  depends on a difference smaller than that, refit with bmc_jax.settings.use_x64(True)
   and check it survives.""")
 
 print("""
-For several GPUs there is fit_phantom_lm_sharded, which splits the same batch across every
+For several GPUs there is fit_batch_sharded, which splits the same batch across every
 local device.
 
 That is the tour: pools (01), simulate (02), a real .seq (03), one-level fitting and its

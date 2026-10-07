@@ -11,15 +11,17 @@ Run:  python 06_quest.py
 """
 import numpy as np
 
-from bmc_jax.fitting import FitSpec, Experiment, Slot, fit, pad_events
+from bmc_jax.fitting import FitSpec, Experiment, FreeParam, fit
+from bmc_jax.simulation import pad_events
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
+from bmc_jax.simulation import to_sim_params, initial_state
+from bmc_jax.sequences import cw_saturation
 
 print(__doc__)
 
 params = example_config("amide")
-jax_params = convert_params(params)
-m0 = get_initial_magnetization(jax_params)
+jax_params = to_sim_params(params)
+m0 = initial_state(jax_params)
 ppm = np.linspace(-6.0, 6.0, 41)
 TSAT = (0.2, 0.5, 1.0, 2.0, 4.0)
 NOISE = 0.002
@@ -54,13 +56,13 @@ quesp = Experiment.stack([
 
 
 def spec(x0_k):
-    return FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=x0_k),
-                    Slot("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0003)])
+    return FitSpec([FreeParam("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=x0_k),
+                    FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0003)])
 
 
 def measure(problem, k_true, seed=0):
     truth = jax_params._replace(cest_k=np.float32([k_true]))
-    z = np.asarray(Experiment(truth, problem.events, get_initial_magnetization(truth),
+    z = np.asarray(Experiment(truth, problem.events, initial_state(truth),
                            params.mz_loc).simulate())
     return (z + np.random.default_rng(seed).normal(0, NOISE, z.shape))[None, :]
 

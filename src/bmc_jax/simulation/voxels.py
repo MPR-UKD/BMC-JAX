@@ -13,7 +13,7 @@ parameters and the initial magnetization, while sharing one event sequence:
     vmap over voxels:    in_axes=(0, None, 0)       # params per-voxel, events shared
 
 The result is a nested vmap (voxels x offsets). The inner vmap still hands the
-physics core (`build_bmc_matrix_and_vector`, `solve_step`) a single scalar tissue
+physics core (`bmc_matrix`, `propagate`) a single scalar tissue
 at a time, so NOT A SINGLE LINE of the physics needs to change. XLA fuses both
 maps into one kernel.
 
@@ -21,12 +21,12 @@ You ALTERNATE between the two paths simply by calling the function that fits the
 task -- no mode flag, no rewrite:
 
   * many offsets, ONE tissue            -> simulator.simulate_spectrum   (offset axis)
-  * ONE sequence, MANY tissues/voxels   -> voxel_simulator.simulate_voxels      (voxel axis)
+  * ONE sequence, MANY tissues/voxels   -> voxels.simulate_voxels      (voxel axis)
 
 Requirements for the voxel path:
-  * Every JAXParams field carries a leading voxel axis of length N_voxels
+  * Every SimParams field carries a leading voxel axis of length N_voxels
     (e.g. water_r1 has shape (N_voxels,) instead of being a scalar).
-    Use `stack_params` to build this from a list of per-voxel JAXParams.
+    Use `stack_params` to build this from a list of per-voxel SimParams.
   * M_init has shape (N_voxels, vector_size).
 """
 
@@ -36,16 +36,17 @@ from typing import List
 import jax
 import jax.numpy as jnp
 
-from .param_adapter import JAXParams
-from .simulator import simulate_sequence, simulate_spectrum, SimEvent
+from .params import SimParams
+from .events import SimEvent
+from .simulate import simulate_sequence, simulate_spectrum
 
 
 # ---------------------------------------------------------------------------
-# Helper: stack a list of per-voxel JAXParams into one batched JAXParams
+# Helper: stack a list of per-voxel SimParams into one batched SimParams
 # ---------------------------------------------------------------------------
-def stack_params(params_list: List[JAXParams]) -> JAXParams:
+def stack_params(params_list: List[SimParams]) -> SimParams:
     """
-    Combine N per-voxel JAXParams into a single JAXParams whose every field has a
+    Combine N per-voxel SimParams into a single SimParams whose every field has a
     leading voxel axis of length N.
 
     Example:
@@ -55,12 +56,12 @@ def stack_params(params_list: List[JAXParams]) -> JAXParams:
     This is exactly the layout the voxel `vmap` (in_axes=0) expects.
 
     Args:
-        params_list: list of JAXParams, one per voxel. They must all share the
+        params_list: list of SimParams, one per voxel. They must all share the
                      same CEST-pool padding (same max_cest_pools) so their array
                      fields have matching shapes.
 
     Returns:
-        JAXParams with a leading voxel axis on every field.
+        SimParams with a leading voxel axis on every field.
     """
     if not params_list:
         raise ValueError("params_list is empty")
@@ -70,7 +71,7 @@ def stack_params(params_list: List[JAXParams]) -> JAXParams:
     return jax.tree.map(lambda *leaves: jnp.stack(leaves, axis=0), *params_list)
 
 
-def tile_params(params: JAXParams, n_voxels: int) -> JAXParams:
+def tile_params(params: SimParams, n_voxels: int) -> SimParams:
     """
     Convenience for testing: replicate ONE tissue into a voxel batch of size
     n_voxels (every voxel identical). Useful to verify that the voxel path
@@ -87,7 +88,7 @@ def tile_params(params: JAXParams, n_voxels: int) -> JAXParams:
 # ---------------------------------------------------------------------------
 @partial(jax.jit, static_argnames=["return_full_trajectory"])
 def simulate_voxels(
-    params_batch: JAXParams,        # every field: (N_voxels, ...)
+    params_batch: SimParams,        # every field: (N_voxels, ...)
     events: SimEvent,               # ONE shared sequence: (n_offsets, n_events)
     M_init_batch: jnp.ndarray,      # (N_voxels, vector_size)
     return_full_trajectory: bool = False,
@@ -100,7 +101,7 @@ def simulate_voxels(
     path, so the physics core is reused unchanged.
 
     Args:
-        params_batch: JAXParams with a leading voxel axis on every field.
+        params_batch: SimParams with a leading voxel axis on every field.
         events: SimEvent for one sequence (shared across all voxels), shape
                 (n_offsets, n_events) per field -- same object you already pass to
                 `simulate_spectrum`.
@@ -141,7 +142,7 @@ def extract_z_spectra(
     This assumes the simulator was called with return_full_trajectory=False, so
     `trajectory` has shape (N_voxels, n_offsets, vec_size) and the last axis is
     the magnetization vector. The water Z-component index is layout-dependent
-    (2 * n_total_pools in the current param_adapter convention) -- pass it in so
+    (2 * n_total_pools in the current simulation.params convention) -- pass it in so
     this helper stays decoupled from the indexing logic.
 
     Returns:

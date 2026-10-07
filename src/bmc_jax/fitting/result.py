@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .spec import FitSpec
+from .params import FitSpec
 
 
 @dataclass(frozen=True)

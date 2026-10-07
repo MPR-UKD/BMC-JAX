@@ -101,13 +101,13 @@ def test_alternative_spellings_are_accepted():
 
 def test_config_to_spectrum_end_to_end():
     """The point of the whole file: .yaml -> Z-spectrum with no bmctool anywhere."""
-    from bmc_jax.jax_solver import (convert_params, cw_saturation, get_initial_magnetization,
-                                    simulate_spectrum)
+    from bmc_jax.simulation import to_sim_params, initial_state, simulate_spectrum
+    from bmc_jax.sequences import cw_saturation
     p = example_config("amide")
-    jp = convert_params(p)
+    jp = to_sim_params(p)
     ppm = np.linspace(-6, 6, 61)
     ev = cw_saturation(ppm, b1_uT=1.0, tsat_s=2.0, b0_T=p.system.b0)
-    z = np.asarray(simulate_spectrum(jp, ev, get_initial_magnetization(jp),
+    z = np.asarray(simulate_spectrum(jp, ev, initial_state(jp),
                                      return_full_trajectory=False)[:, p.mz_loc])
     assert z.shape == ppm.shape
     assert 0.0 < z.min() < z.max() < 1.05
@@ -123,12 +123,12 @@ def test_mz_loc_matches_the_simulator(name):
     2 + 2*n_cest tests arithmetic. Simulating far off resonance, where nothing is saturated and
     water Mz must be the equilibrium value, tests the layout.
     """
-    from bmc_jax.jax_solver import (convert_params, cw_saturation, get_initial_magnetization,
-                                    simulate_spectrum)
+    from bmc_jax.simulation import to_sim_params, initial_state, simulate_spectrum
+    from bmc_jax.sequences import cw_saturation
     p = example_config(name)
-    jp = convert_params(p)
+    jp = to_sim_params(p)
     ev = cw_saturation([-300.0], b1_uT=0.0, tsat_s=0.1, b0_T=p.system.b0)
-    m = np.asarray(simulate_spectrum(jp, ev, get_initial_magnetization(jp),
+    m = np.asarray(simulate_spectrum(jp, ev, initial_state(jp),
                                      return_full_trajectory=False))[0]
     assert m[p.mz_loc] == pytest.approx(p.water_pool.f, abs=1e-3), (
         f"index {p.mz_loc} holds {m[p.mz_loc]:.4f}, not water Mz ({p.water_pool.f})")
@@ -142,10 +142,10 @@ def test_integer_config_values_become_float_parameters():
     own reference configs write `k: 50`, so this is the normal case, not a corner one. Only
     mt_lineshape is genuinely discrete and stays integer.
     """
-    from bmc_jax.jax_solver import convert_params
+    from bmc_jax.simulation import to_sim_params
     discrete = {"mt_lineshape"}
     for name in ALL:
-        jp = convert_params(example_config(name))
+        jp = to_sim_params(example_config(name))
         ints = [f for f, v in zip(jp._fields, jp)
                 if f not in discrete and np.asarray(v).dtype.kind != "f"]
         assert ints == [], f"{name}: non-float physical parameters {ints}"
@@ -161,7 +161,7 @@ def test_a_pool_built_from_python_ints_is_also_float():
 def test_options_scale_reaches_the_simulation():
     """`scale: 0.5` in a config must change the starting magnetisation, not be quietly dropped.
 
-    convert_params carries no options, so a caller who builds the starting state by hand gets
+    to_sim_params carries no options, so a caller who builds the starting state by hand gets
     equilibrium whatever the config says. Experiment.from_parameters is what closes that, and
     this pins it: without the test the field can go back to being ignored and every spectrum
     would simply sit a little too high.
@@ -169,7 +169,7 @@ def test_options_scale_reaches_the_simulation():
     from dataclasses import replace
 
     from bmc_jax.fitting import Experiment
-    from bmc_jax.jax_solver import cw_saturation
+    from bmc_jax.sequences import cw_saturation
 
     params = example_config("amide_noe_mt")
     events = cw_saturation(np.linspace(-6.0, 6.0, 21), b1_uT=1.0, tsat_s=2.0, b0_T=params.system.b0)
@@ -190,10 +190,10 @@ def test_the_mt_pool_is_scaled_too():
     2.6e-3 -- at the noise floor of a real measurement, so a fit would absorb the difference
     into a parameter rather than anyone noticing it.
     """
-    from bmc_jax.jax_solver import convert_params, get_initial_magnetization
+    from bmc_jax.simulation import to_sim_params, initial_state
 
-    jp = convert_params(example_config("amide_noe_mt"))
-    m_eq = np.asarray(get_initial_magnetization(jp))
-    m_scaled = np.asarray(get_initial_magnetization(jp, scale=0.582))
+    jp = to_sim_params(example_config("amide_noe_mt"))
+    m_eq = np.asarray(initial_state(jp))
+    m_scaled = np.asarray(initial_state(jp, m_start=0.582))
     assert m_scaled == pytest.approx(m_eq * 0.582, rel=1e-6)
     assert m_scaled[-1] == pytest.approx(m_eq[-1] * 0.582), "the MT slot was not scaled"

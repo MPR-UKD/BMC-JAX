@@ -1,6 +1,6 @@
-# JAX Solver Architecture
+# Simulation: the differentiable Bloch-McConnell engine
 
-The `jax_solver` module provides the computational backbone for translating and executing Bloch-McConnell equations. By restricting the simulation entirely to JAX primitives, the framework constructs a continuous, fully differentiable computational graph. This structural design evaluates exact analytical derivatives ($\mathbf{J} = \partial \mathbf{Z} / \partial \boldsymbol{\theta}$) via Automatic Differentiation, replacing computationally expensive and numerically unstable finite difference approximations.
+The `simulation` package (formerly `jax_solver`, renamed 2026-10-07) provides the computational backbone for translating and executing Bloch-McConnell equations. By restricting the simulation entirely to JAX primitives, the framework constructs a continuous, fully differentiable computational graph. This structural design evaluates exact analytical derivatives ($\mathbf{J} = \partial \mathbf{Z} / \partial \boldsymbol{\theta}$) via Automatic Differentiation, replacing computationally expensive and numerically unstable finite difference approximations.
 
 ## Mathematical Formulation
 
@@ -25,11 +25,15 @@ The simulation isolates execution across two fundamental paradigms:
 
 ## Core Modules
 
-* `param_adapter.py`: Adapts standard object-oriented representations into strictly statically-padded arrays (`JAXParams`). Implements the construction logic for the $\mathbf{M}_{init}$ initialization maps.
-* `seq_adapter.py`: Converts nested `.seq` arrays into flattened `SimEvent` blocks. Events are rigorously padded against shape limits (`max_pulse_samples`) ensuring graph stability for JIT compilation.
-* `simulator.py`: Implements exactly the forward time-domain evolution core logic (`simulate_spectrum`), generating sequence-dependent Homogeneous Bloch-McConnell matrices natively invoking the `vmap` + `scan` acceleration architecture.
-* `utils.py`: Centralized precision safety ensuring absolute adherence for parameters mapping standard constraints down dynamically to targeted hardware limits (`float32` testing vs `float64` rigor).
-* `solver.py`: Executes the pure optimization bindings matching parameters analytically via the evaluated JAX inverse model limits linked iteratively against gradient-based solvers.
+* `params.py`: Adapts the object-oriented pool description into statically padded arrays (`SimParams`, via `to_sim_params`) and builds the initial state (`initial_state`, with `m_start` the magnetisation the readout leaves behind).
+* `events.py`: The sequence as the solver sees it (`SimEvent`, `EventType`), padded to fixed shapes for JIT compilation (`pad_events`), cast and repeated.
+* `matrix.py`: The homogeneous-coordinate Bloch-McConnell matrix (`bmc_matrix`), with Lorentzian and SuperLorentzian lineshapes.
+* `expm.py`: One time step (`propagate`), with the matrix exponential chosen by `bmc_jax.settings.use_expm`: `"library"` (`jax.scipy.linalg.expm`, the default) or `"plain"` (the same float32 algorithm without library calls).
+* `simulate.py`: The forward time-domain evolution (`simulate_sequence`, `simulate_spectrum`) with the `vmap` + `scan` architecture above.
+* `voxels.py`: The same, batched over voxels or samples with per-voxel parameters.
+* `multigpu.py`: Spreads an already-vmapped batch across every local GPU.
+
+Reading a Pulseq `.seq` and building saturation sequences in code live in `bmc_jax.sequences`.
 
 <!-- ## Magnetization Vector State
 

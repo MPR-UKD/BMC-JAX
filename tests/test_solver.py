@@ -19,8 +19,8 @@ TOLERANCES
 import numpy as np
 import pytest
 
-from bmc_jax.jax_solver import (JAXParams, cw_saturation, get_initial_magnetization,
-                                hz_per_ppm, simulate_spectrum)
+from bmc_jax.simulation import SimParams, initial_state, simulate_spectrum
+from bmc_jax.sequences import cw_saturation, hz_per_ppm
 
 B0_T = 2.8936
 WATER_Z = 4          # index of water Mz for a one-CEST-pool model: 2 * (1 + n_pools)
@@ -30,7 +30,7 @@ DW = 3.5             # amide-like pool offset [ppm]
 def params(f=0.005, k=300.0, dw=DW, t2_pool_s=0.01):
     """One water pool, one CEST pool, no MT. Values are ordinary amide-CEST numbers."""
     s = np.float32
-    return JAXParams(
+    return SimParams(
         water_r1=s(1 / 3.0), water_r2=s(1 / 0.6), water_f=s(1.0),
         cest_k=np.float32([k]), cest_f=np.float32([f]), cest_dw=np.float32([dw]),
         cest_r1=np.float32([1.0]), cest_r2=np.float32([1.0 / t2_pool_s]),
@@ -41,7 +41,7 @@ def params(f=0.005, k=300.0, dw=DW, t2_pool_s=0.01):
 
 def z_spectrum(p, ppm, b1_uT=1.0, tsat_s=2.0):
     ev = cw_saturation(ppm, b1_uT=b1_uT, tsat_s=tsat_s, b0_T=B0_T)
-    return np.asarray(simulate_spectrum(p, ev, get_initial_magnetization(p),
+    return np.asarray(simulate_spectrum(p, ev, initial_state(p),
                                         return_full_trajectory=False)[:, WATER_Z])
 
 
@@ -122,7 +122,7 @@ def test_ppm_axis_scales_with_field(b0):
     ev = cw_saturation(ppm, b1_uT=1.0, tsat_s=2.0, b0_T=b0)
     p_with = params()._replace(b0=np.float32(b0))
     p_none = params(f=0.0)._replace(b0=np.float32(b0))
-    z_with, z_none = (np.asarray(simulate_spectrum(q, ev, get_initial_magnetization(q),
+    z_with, z_none = (np.asarray(simulate_spectrum(q, ev, initial_state(q),
                                                    return_full_trajectory=False)[:, WATER_Z])
                       for q in (p_with, p_none))
     peak_ppm = ppm[int(np.argmax(z_none - z_with))]

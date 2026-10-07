@@ -15,12 +15,13 @@ pip install -e .
 ```python
 import numpy as np
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization
-from bmc_jax.fitting import FitSpec, Slot, Experiment, fit
+from bmc_jax.simulation import to_sim_params, initial_state
+from bmc_jax.sequences import cw_saturation
+from bmc_jax.fitting import FitSpec, FreeParam, Experiment, fit
 
 params = example_config("amide")          # or from_yaml("your_model.yaml")
-jp  = convert_params(params)
-m0  = get_initial_magnetization(jp)
+jp  = to_sim_params(params)
+m0  = initial_state(jp)
 ppm = np.linspace(-6, 6, 61)
 
 # a QUESP ladder: the same pools saturated at four powers, fitted as one problem
@@ -30,8 +31,8 @@ ladder = Experiment.stack([
 
 z = np.asarray(ladder.simulate())
 
-spec = FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=5000.0, x0=300.0),
-                Slot("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0005)])
+spec = FitSpec([FreeParam("k", "cest_k", 0, scale=100.0, lo=5.0, hi=5000.0, x0=300.0),
+                FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=0.0005)])
 res = fit(ladder, spec, z[None, :], n_per_block=len(ppm))
 print(res.summary())
 ```
@@ -77,33 +78,70 @@ dependency the simulator does not use.
 
 ```
 bmc_jax/
-├── jax_solver/      the forward model
-│   ├── matrix.py            the BMC matrix and one time step
-│   ├── simulator.py         scan over time, vmap over offsets
-│   ├── voxel_simulator.py   batched over voxels, with per-voxel parameters
-│   ├── param_adapter.py     pools -> the static array layout JIT needs
-│   ├── seq_adapter.py       read a Pulseq .seq
-│   ├── sequences.py         or build one in code, with no file at all
-│   └── sharded.py           spread a batch across every local GPU
+├── simulation/          the forward model
+│   ├── params.py            pools -> SimParams, the static array layout JIT needs; initial_state
+│   ├── events.py            SimEvent, EventType, padding and casting of event blocks
+│   ├── matrix.py            the Bloch–McConnell matrix in homogeneous coordinates
+│   ├── expm.py              one time step, with either matrix exponential (see settings)
+│   ├── simulate.py          scan over time, vmap over offsets
+│   ├── voxels.py            batched over voxels, with per-voxel parameters
+│   └── multigpu.py          spread a batch across every local GPU
+├── sequences/
+│   ├── saturation.py        build a saturation sequence in code, with no file at all
+│   └── pulseq.py            or read a Pulseq .seq
 ├── fitting/
-│   ├── problem.py           what is simulated       (Experiment, Experiment.stack)
-│   ├── spec.py              which parameters are free (FitSpec, Slot)
+│   ├── experiment.py        what is simulated         (Experiment, Experiment.stack)
+│   ├── params.py            which parameters are free (FitSpec, FreeParam)
 │   ├── residual.py          what is compared
-│   ├── optimize.py          bounded Levenberg–Marquardt, usable on its own
-│   ├── batching.py          one spectrum, many voxels, or many GPUs
+│   ├── lm.py                bounded Levenberg–Marquardt, usable on its own
+│   ├── independent.py       every sample on its own: one spectrum, many voxels, or many GPUs
 │   └── result.py            FitResult: values, residual per rung, bounds hit
-└── io/                      Pulseq-CEST YAML, as plain frozen dataclasses
+├── io/                      Pulseq-CEST YAML, as plain frozen dataclasses
+├── mrf/                     MR-fingerprinting dictionaries from the simulator
+└── settings.py              use_x64 (float precision), use_expm (which matrix exponential)
 ```
 
 Nothing about any particular agent is hardcoded. A `FitSpec` names fields and pool indices;
 which pools exist and what they are called belongs to the model, not to the fitter.
 
-`optimize.py` does not import the solver, so `lm_minimize` is a general bounded least-squares
+`lm.py` does not import the simulation, so `levenberg_marquardt` is a general bounded least-squares
 routine you can use for anything. That boundary is enforced by a test, not by convention.
+
+### Two matrix exponentials
+
+Every time step is one matrix exponential. `bmc_jax.settings.use_expm` picks how it is computed:
+
+```python
+import bmc_jax
+bmc_jax.settings.use_expm("library")   # default: jax.scipy.linalg.expm (cuBLAS / cuSOLVER on a GPU)
+bmc_jax.settings.use_expm("plain")     # the same float32 algorithm, written out: no library call
+```
+
+Both give the same answer to float32 rounding. "plain" exists because, on some GPU batch shapes,
+the library calls inside `expm` returned NaN or wrong slopes in a vmapped Jacobian while the
+residual itself was fine. `simulation/expm.py` has the details.
+
+### Renamed in 2026-10
+
+The layout and several names changed, with no aliases kept: update imports with this table.
+
+| before | now |
+|---|---|
+| `bmc_jax.jax_solver` | `bmc_jax.simulation`, `bmc_jax.sequences`, `bmc_jax.mrf` |
+| `JAXParams`, `convert_params` | `SimParams`, `to_sim_params` |
+| `get_initial_magnetization(p, scale=)` | `initial_state(p, m_start=)` |
+| `build_bmc_matrix_and_vector`, `solve_step` | `bmc_matrix`, `propagate` |
+| `convert_sequence(_batch)` | `events_from_seq(_batch)` |
+| `Slot`, `apply_x` | `FreeParam`, `write_params` |
+| `lm_minimize` | `levenberg_marquardt` |
+| `make_single_residual`, `make_phantom_residual` | `residual_one`, `residual_batch` |
+| `fit_voxel`, `fit_phantom_lm(_sharded)`, `fit_phantom_adam` | `fit_one`, `fit_batch(_sharded)`, `fit_batch_adam` |
+| `bmc_jax.precision.configure_x64` | `bmc_jax.settings.use_x64` |
 
 ## Tutorials
 
-Seven scripts in [`examples/`](examples/), each runnable on its own with no data files:
+Nine scripts in [`examples/`](examples/), each runnable on its own; 01–07 need no data files, 08 and 09
+fit the phantom measurement that ships in `examples/data/`:
 
 | | |
 |---|---|
@@ -114,6 +152,8 @@ Seven scripts in [`examples/`](examples/), each runnable on its own with no data
 | `05_fit_ladder.py` | the QUESP ladder |
 | `06_quest.py` | the saturation-time ladder, and QUESP vs QUEST as a cross-check |
 | `07_many_voxels.py` | a slice, with per-voxel calibration held fixed |
+| `08_quesp.py` | QUESP on real phantom data |
+| `09_quest.py` | QUEST on the same phantom |
 
 ## Two things worth knowing before you trust a number
 
@@ -132,7 +172,7 @@ singular that a ~1e-7 difference in the Jacobian moves the result by ~1 % in `k`
 relative between one shot and `max_chunk=32`, against 1.8e-7 in float64. That is well below the
 error noise imposes — on 0.2 % noise, float32 and float64 land 2.147 % and 2.054 % from truth —
 so fit in float32 and re-check anything that turns on a smaller difference with
-`bmc_jax.precision.configure_x64(True)`.
+`bmc_jax.settings.use_x64(True)`.
 
 ## Tests
 

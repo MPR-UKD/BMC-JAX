@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import jax.numpy as jnp
 
-from bmc_jax.jax_solver import JAXParams, SimEvent
+from bmc_jax.simulation import SimParams, SimEvent
 
 DATA = Path(__file__).resolve().parent / "data"
 
@@ -76,7 +76,7 @@ def load_events(stem, keep=None):
 
 
 def vial_params(data):
-    """The four vials as one batched `JAXParams`, with everything the fit does not vary.
+    """The four vials as one batched `SimParams`, with everything the fit does not vary.
 
     Each vial gets its own measured water R1, B0 offset and relative B1, and its own CEST-pool
     T2; water R2 is the PBS value for every tube. Exchange rate and pool size are left at
@@ -89,12 +89,12 @@ def vial_params(data):
 
     Returns
     -------
-    JAXParams
+    SimParams
         Leading axis of length 4, in the order of `data["vial_names"]`.
     """
     n = len(data["vial_names"])
     ones = np.ones(n, np.float32)
-    return JAXParams(
+    return SimParams(
         water_r1=jnp.asarray(data["R1"]),
         water_r2=jnp.asarray(float(data["water_r2"]) * ones),
         water_f=jnp.asarray(ones),
@@ -116,8 +116,8 @@ def start_magnetisation(params):
     """Per-vial starting magnetisation at `M_START`, stacked to match `vial_params`."""
     import jax
 
-    from bmc_jax.jax_solver import get_initial_magnetization
+    from bmc_jax.simulation import initial_state
 
     n = params.water_r1.shape[0]
-    return jnp.stack([get_initial_magnetization(
-        jax.tree.map(lambda a, i=i: a[i], params), scale=M_START) for i in range(n)])
+    return jnp.stack([initial_state(
+        jax.tree.map(lambda a, i=i: a[i], params), m_start=M_START) for i in range(n)])

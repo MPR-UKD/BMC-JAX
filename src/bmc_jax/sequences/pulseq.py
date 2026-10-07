@@ -12,9 +12,9 @@ from types import SimpleNamespace
 from typing import Tuple, Optional
 import jax.numpy as jnp
 
-from .simulator import SimEvent, EventType
+from ..simulation.events import SimEvent, EventType
 
-def convert_sequence(
+def events_from_seq(
     seq: pp.Sequence,
     max_pulse_samples: int = 500,
     max_events: Optional[int] = None
@@ -179,7 +179,7 @@ def convert_sequence(
     
     return events, n_actual
 
-def convert_sequence_batch(
+def events_from_seq_batch(
     seq: pp.Sequence,
     max_pulse_samples: int = 500
 ) -> Tuple[SimEvent, int]:

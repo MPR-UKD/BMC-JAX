@@ -18,7 +18,7 @@ SRC = Path(__file__).parents[1] / "src" / "bmc_jax"
 #: Which modules each layer is allowed to import FROM THIS PACKAGE. Layers only ever depend
 #: downward, so the graph is a DAG and there is a bottom to start reading at.
 ALLOWED = {
-    "precision":        set(),
+    "settings":         set(),
     "io.config":              {"io.parameters"},
     "io.parameters.pool":     set(),
     "io.parameters.water_pool":  {"io.parameters.pool"},
@@ -29,13 +29,23 @@ ALLOWED = {
     "io.parameters.parameters": {"io.parameters.cest_pool", "io.parameters.mt_pool",
                                  "io.parameters.options", "io.parameters.system",
                                  "io.parameters.water_pool"},
-    "fitting.experiment":  {"jax_solver"},
-    "fitting.spec":     {"jax_solver"},
-    "fitting.optimize": set(),                                   # <- the important one
-    "fitting.result":   {"fitting.spec"},
-    "fitting.residual": {"jax_solver", "fitting.spec"},
-    "fitting.batching": {"jax_solver", "fitting.spec", "fitting.residual",
-                         "fitting.optimize", "fitting.experiment", "fitting.result"},
+    "simulation.params":   set(),
+    "simulation.events":   set(),
+    "simulation.matrix":   {"simulation.params"},
+    "simulation.expm":     {"settings"},                     # the solver switch, nothing else
+    "simulation.simulate": {"simulation.params", "simulation.events", "simulation.matrix", "simulation.expm"},
+    "simulation.voxels":   {"simulation.params", "simulation.events", "simulation.simulate"},
+    "simulation.multigpu": set(),
+    "sequences.saturation": {"simulation.events"},
+    "sequences.pulseq":     {"simulation.events"},
+    "mrf.dictionary":      {"simulation.params", "simulation.events", "simulation.voxels"},
+    "fitting.experiment":  {"simulation"},
+    "fitting.params":   {"simulation"},
+    "fitting.lm":       set(),                                   # <- the important one
+    "fitting.result":   {"fitting.params"},
+    "fitting.residual": {"simulation", "fitting.params"},
+    "fitting.independent": {"simulation", "fitting.params", "fitting.residual",
+                            "fitting.lm", "fitting.experiment", "fitting.result"},
 }
 
 
@@ -62,17 +72,17 @@ def internal_imports(path: Path) -> set[str]:
 def test_import_layering(dotted):
     """Each module imports only from the layers below it -- so the graph is a DAG."""
     got = internal_imports(module_path(dotted))
-    # a dependency on 'jax_solver.simulator' satisfies an allowance of 'jax_solver'
+    # a dependency on 'simulation.simulate' satisfies an allowance of 'simulation'
     for dep in got:
         assert any(dep == a or dep.startswith(a + ".") for a in ALLOWED[dotted]), (
             f"{dotted} imports {dep}, which is not in its allowed layer {ALLOWED[dotted] or '{}'}")
 
 
-def test_optimize_does_not_import_the_solver():
+def test_lm_does_not_import_the_simulation():
     """The optimiser must be usable without any of the physics. This is the whole point."""
-    src = module_path("fitting.optimize").read_text()
-    assert "jax_solver" not in src, "optimize.py reached for the solver; the split is cosmetic"
-    assert internal_imports(module_path("fitting.optimize")) == set()
+    src = module_path("fitting.lm").read_text()
+    assert "simulation" not in src and "jax_solver" not in src, "lm.py reached for the solver; the split is cosmetic"
+    assert internal_imports(module_path("fitting.lm")) == set()
 
 
 def test_no_environment_variables_anywhere_in_the_package():
@@ -82,7 +92,7 @@ def test_no_environment_variables_anywhere_in_the_package():
     may follow the code in here: configuration arrives as arguments.
 
     Checked with ast rather than by grepping for the text, because a docstring that SHOWS the
-    caller how to do it themselves -- as precision.py does -- is not an environment read.
+    caller how to do it themselves -- as settings.py does -- is not an environment read.
     """
     offenders = []
     for path in sorted(SRC.rglob("*.py")):
@@ -100,7 +110,10 @@ def test_public_api_has_no_private_names():
     """__all__ is the contract. A leading underscore in it means the boundary is wrong."""
     import bmc_jax.fitting as F
     import bmc_jax.io as IO
-    for mod in (F, IO):
+    import bmc_jax.mrf as M
+    import bmc_jax.sequences as Q
+    import bmc_jax.simulation as S
+    for mod in (F, IO, S, Q, M):
         assert hasattr(mod, "__all__"), f"{mod.__name__} has no __all__"
         bad = [n for n in mod.__all__ if n.startswith("_")]
         assert bad == [], f"{mod.__name__}.__all__ exports private names: {bad}"
@@ -109,8 +122,10 @@ def test_public_api_has_no_private_names():
 def test_every_exported_name_exists():
     import bmc_jax.fitting as F
     import bmc_jax.io as IO
-    import bmc_jax.jax_solver as S
-    for mod in (F, IO, S):
+    import bmc_jax.mrf as M
+    import bmc_jax.sequences as Q
+    import bmc_jax.simulation as S
+    for mod in (F, IO, S, Q, M):
         missing = [n for n in mod.__all__ if not hasattr(mod, n)]
         assert missing == [], f"{mod.__name__}.__all__ promises {missing}, which do not exist"
 
@@ -135,10 +150,10 @@ def test_parameter_objects_are_immutable():
         replace(p.cest_pools[0], k=-1.0)
 
 
-def test_the_old_names_still_work():
-    """The split must not break a single caller. Every pre-split name is still importable."""
-    from bmc_jax.fitting import (FitSpec, Slot, apply_x, fit_phantom_adam,
-                                 fit_phantom_lm, fit_phantom_lm_sharded, fit_voxel,
-                                 make_phantom_residual, make_single_residual)
-    from bmc_jax.fitting import _lm_one, lm_minimize
-    assert _lm_one is lm_minimize, "the compatibility alias drifted from the public name"
+def test_the_old_layout_is_gone():
+    """Renamed on 2026-10-07 with no aliases left: nothing may import the old paths."""
+    for old in ("jax_solver", "precision.py", "_renamed.py", "fitting/spec.py", "fitting/optimize.py",
+                "fitting/batching.py"):
+        assert not (SRC / old).exists(), f"{old} came back"
+    for path in sorted(SRC.rglob("*.py")):
+        assert not any(m.startswith(("jax_solver", "precision")) for m in internal_imports(path)), path

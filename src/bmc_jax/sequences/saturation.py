@@ -1,6 +1,6 @@
 """Build a saturation sequence in code, with no .seq file and nothing on disk.
 
-`seq_adapter` READS Pulseq. This is its missing counterpart: it WRITES the same padded
+`sequences.pulseq` READS Pulseq. This is its missing counterpart: it WRITES the same padded
 `SimEvent` blocks directly, so the simulator can be used -- and tested -- by anyone who does not
 have a scanner sequence, a Pulseq install, or a pre-built event cache. Without it, pypulseq is
 optional only on paper.
@@ -12,7 +12,7 @@ differs between them.
 import numpy as np
 import jax.numpy as jnp
 
-from .simulator import SimEvent, EventType
+from ..simulation.events import SimEvent, EventType
 
 #: Proton gyromagnetic ratio [rad / (s * uT)]. /2pi gives 42.577 Hz/uT.
 GAMMA_RAD_PER_S_UT = 267.5153
@@ -31,7 +31,7 @@ def cw_saturation(ppm, b1_uT: float, tsat_s: float, b0_T: float = 2.8936,
 
     One RF block of `tsat_s` at constant amplitude, followed by a zero-duration ADC. This is the
     idealisation a QUESP/QUEST ladder is usually described by: real scanner sequences are pulse
-    trains with gaps, and `seq_adapter` is what reads those. Use this for tests, for teaching,
+    trains with gaps, and `sequences.pulseq` is what reads those. Use this for tests, for teaching,
     and for any question about the physics that does not depend on the pulse shape.
 
     Parameters

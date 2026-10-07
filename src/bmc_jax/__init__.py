@@ -15,13 +15,22 @@ makes gradient-based fitting and Cramer-Rao bounds cheap.
 
 Subpackages
 -----------
-jax_solver : sequence and parameter adapters, the forward evolution core (`simulate_spectrum`),
-             the per-voxel batch variant, and multi-GPU sharding.
-fitting    : bounded Levenberg-Marquardt fitting of selected parameters against measured
-             Z-spectra -- `FitSpec` declares WHICH parameters are free, the residual is built
-             from the forward model, and nothing about any particular agent is hardcoded.
+simulation : the forward model -- parameters as arrays (SimParams), events, the BMC matrix, the time
+             step (two matrix exponentials), `simulate_spectrum`, batched voxels, multi-GPU.
+sequences  : how a sequence becomes events: built in code (`cw_saturation`) or read from a Pulseq .seq.
+fitting    : bounded Levenberg-Marquardt fitting of selected parameters against measured Z-spectra --
+             `FitSpec` declares WHICH parameters are free (`FreeParam`), and nothing about any
+             particular agent is hardcoded.
+io         : formats only -- the Pulseq-CEST parameter format (Parameters, pools, YAML).
+mrf        : MR-fingerprinting dictionaries from the simulator.
+settings   : global choices: float precision (`use_x64`) and the matrix exponential (`use_expm`).
 
-Precision: float32 is the default and is adequate for k/f fitting. `precision.configure_x64()`
-enables float64 where a near-singular Jacobian needs it.
+Precision: float32 is the default and is adequate for k/f fitting. `settings.use_x64(True)` enables
+float64 where a near-singular Jacobian needs it.
+
+Renamed on 2026-10-07 (jax_solver -> simulation, precision -> settings, Slot -> FreeParam, ...); the
+README has the old -> new table.
 """
+from . import settings                                     # noqa: F401  bmc_jax.settings.use_expm(...)
+
 __version__ = "0.1.0"

@@ -14,67 +14,8 @@ from typing import Sequence
 import jax
 import jax.numpy as jnp
 
-from ..jax_solver.simulator import EventType, SimEvent, simulate_spectrum
-
-
-def pad_events(events: SimEvent, width: int) -> SimEvent:
-    """Pad a sequence to `width` events with leading no-ops, so it can stack with longer ones.
-
-    Parameters
-    ----------
-    events
-        Batched events, shape (n_offsets, n_events).
-    width
-        Target number of events. Must be at least the current number.
-
-    Returns
-    -------
-    SimEvent
-        Events of shape (n_offsets, width), physically identical to the input.
-
-    Raises
-    ------
-    ValueError
-        If `width` is smaller than the sequence already is.
-
-    Notes
-    -----
-    The padding is zero-duration DELAY events, which are a true no-op: the solver skips evolution
-    when ``dt <= 1e-9``, and DELAY triggers neither the spoiler branch nor the ADC reset. Nothing
-    about the simulated magnetisation changes.
-
-    They go at the FRONT, and that is not a matter of taste. `simulate_sequence` returns
-    ``final_state.last_M``, which every step overwrites, while an ADC with ``reset_after_adc``
-    sets the running magnetisation back to its initial value. A no-op appended AFTER the readout
-    would therefore copy that reset value into ``last_M`` and the function would return the
-    starting magnetisation instead of the saturated one -- silently, with a plausible-looking
-    spectrum. Padding before the sequence begins cannot do this, because the state it passes
-    through is the initial state either way.
-
-    The other tempting mistake is padding with a nonzero-duration, zero-amplitude event. That is
-    not a no-op either: it is free relaxation, and it would add recovery time to exactly the
-    shortest saturation in a QUEST ladder, which is the rung that carries the rate information.
-    """
-    n_offsets, n_events = events.dt.shape
-    if width < n_events:
-        raise ValueError(f"cannot pad {n_events} events down to {width}")
-    if width == n_events:
-        return events
-
-    n_pad = width - n_events
-
-    def prepend(leaf, fill):
-        block = jnp.full((n_offsets, n_pad), fill, leaf.dtype)
-        return jnp.concatenate([block, leaf], axis=1)
-
-    return SimEvent(
-        type=prepend(events.type, EventType.DELAY),
-        dt=prepend(events.dt, 0.0),
-        rf_amp=prepend(events.rf_amp, 0.0),
-        rf_phase=prepend(events.rf_phase, 0.0),
-        rf_freq=prepend(events.rf_freq, 0.0),
-        adc_idx=prepend(events.adc_idx, -1),
-    )
+from ..simulation.events import EventType, SimEvent, pad_events
+from ..simulation.simulate import simulate_spectrum
 
 
 @dataclass(frozen=True)
@@ -84,7 +25,7 @@ class Experiment:
     Attributes
     ----------
     params
-        A `JAXParams`, either for one sample or with a leading batch axis.
+        A `SimParams`, either for one sample or with a leading batch axis.
     events
         Batched `SimEvent`, shape (n_offsets, n_events).
     m0
@@ -151,11 +92,11 @@ class Experiment:
         >>> # doctest: +SKIP
         >>> exp = Experiment.from_parameters(example_config("amide"), events)
         """
-        from ..jax_solver.param_adapter import convert_params, get_initial_magnetization
+        from ..simulation.params import to_sim_params, initial_state
 
-        jax_params = convert_params(params)
+        jax_params = to_sim_params(params)
         scale = float(getattr(params.options, "scale", 1.0))
-        return cls(jax_params, events, get_initial_magnetization(jax_params, scale), params.mz_loc)
+        return cls(jax_params, events, initial_state(jax_params, scale), params.mz_loc)
 
     @classmethod
     def stack(cls, experiments: Sequence["Experiment"]) -> "Experiment":

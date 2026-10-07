@@ -1,7 +1,7 @@
-"""sharded.py -- run a vmapped batch across all local GPUs, with bounded per-GPU memory.
+"""multigpu.py (formerly sharded.py) -- run a vmapped batch across all local GPUs, with bounded per-GPU memory.
 
 The modern replacement for the jax.pmap voxel-sharding path (the old
-`fitting.fit_phantom_lm_sharded`). Uses jax.jit + NamedSharding (GSPMD): the leading BATCH
+`fitting.fit_batch_sharded`). Uses jax.jit + NamedSharding (GSPMD): the leading BATCH
 axis of every input is sharded across devices and XLA partitions the already-vmapped function
 automatically -- no separate per-device function, no manual replication of the constants.
 

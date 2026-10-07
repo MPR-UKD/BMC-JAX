@@ -1,7 +1,7 @@
-"""optimize.py -- bounded Levenberg-Marquardt in JAX. Knows nothing about Bloch-McConnell.
+"""lm.py -- bounded Levenberg-Marquardt in JAX (formerly optimize.py, `lm_minimize`). Knows nothing about Bloch-McConnell.
 
 THIS MODULE MUST NOT IMPORT THE SOLVER. It takes a residual function and bounds and minimises;
-that is the whole contract. Keeping it that way is what makes `lm_minimize` usable on its own,
+that is the whole contract. Keeping it that way is what makes `levenberg_marquardt` usable on its own,
 and it is checked by tests/test_structure.py rather than left to good intentions.
 
 Damped Gauss-Newton with a fixed iteration count and accept/reject, jitted and vmappable. Fixed
@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 
 @partial(jax.jit, static_argnames=["resid_fn", "n_iter", "use_fwd", "return_trajectory"])
-def _lm_one(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=False, return_trajectory=False):
+def levenberg_marquardt(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=False, return_trajectory=False):
     """Damped Gauss-Newton (LM) for ONE voxel, fixed iterations with accept/reject.
     Bounds enforced by clipping the step. Pure JAX -> vmappable.
 
@@ -61,8 +61,3 @@ def _lm_one(resid_fn, x0, lo, hi, n_iter=40, lam0=1e-2, use_fwd=False, return_tr
 def c_out_select(better, a, b):
     return jnp.where(better, a, b)
 
-
-#: Public name. `_lm_one` was private by convention while being imported across module
-#: boundaries by three separate programs, which is the clearest possible sign the boundary was
-#: in the wrong place. Both names refer to the same jitted function.
-lm_minimize = _lm_one

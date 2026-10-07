@@ -10,13 +10,14 @@ import sys
 import numpy as np
 
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import convert_params, cw_saturation, get_initial_magnetization, simulate_spectrum
+from bmc_jax.simulation import to_sim_params, initial_state, simulate_spectrum
+from bmc_jax.sequences import cw_saturation
 
 print(__doc__)
 
 params = example_config("amide_noe_mt")     # water + amide (+3.5) + NOE (-3.0) + MT
-jax_params = convert_params(params)
-m0 = get_initial_magnetization(jax_params)
+jax_params = to_sim_params(params)
+m0 = initial_state(jax_params)
 
 ppm = np.linspace(-6.0, 6.0, 121)
 
@@ -68,8 +69,8 @@ from dataclasses import replace
 
 print("\ncontribution of each pool at its own offset (Z without it, minus Z with it):")
 for name, kept in [("amide", [params.cest_pools[1]]), ("NOE", [params.cest_pools[0]])]:
-    stripped = convert_params(replace(params, cest_pools=kept))
-    z_without = np.asarray(simulate_spectrum(stripped, events, get_initial_magnetization(stripped),
+    stripped = to_sim_params(replace(params, cest_pools=kept))
+    z_without = np.asarray(simulate_spectrum(stripped, events, initial_state(stripped),
                                              return_full_trajectory=False)[:, replace(params, cest_pools=kept).mz_loc])
     j = int(np.argmax(np.abs(z_without - z)))
     print(f"  {name:6s} largest effect {abs(z_without - z)[j]:.4f} at {ppm[j]:+.1f} ppm")

@@ -19,7 +19,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _phantom import (EXCLUDE_PPM, load_data, load_events, start_magnetisation, vial_params)
 
-from bmc_jax.fitting import Experiment, FitSpec, Slot, fit
+from bmc_jax.fitting import Experiment, FitSpec, FreeParam, fit
 
 print(__doc__)
 
@@ -56,8 +56,8 @@ print(f"Model: {ladder.n_offsets} offsets    Data: {Z.shape[0]} vials x {Z.shape
 # Identical to tutorial 08: the same two free parameters, the same fixed per-vial constants, the
 # same bounds. Only the ladder differs, which is what makes the comparison meaningful.
 
-spec = FitSpec([Slot("k", "cest_k", 0, scale=1000.0, lo=5.0, hi=5000.0, x0=300.0),
-                Slot("f", "cest_f", 0, scale=0.01, lo=1e-5, hi=0.03, x0=0.008)])
+spec = FitSpec([FreeParam("k", "cest_k", 0, scale=1000.0, lo=5.0, hi=5000.0, x0=300.0),
+                FreeParam("f", "cest_f", 0, scale=0.01, lo=1e-5, hi=0.03, x0=0.008)])
 res = fit(ladder, spec, Z, n_iter=20, n_per_block=int(keep.sum()))
 
 # ---------------------------------------------------------------------------------------------

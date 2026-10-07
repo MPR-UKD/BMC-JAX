@@ -16,10 +16,10 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from bmc_jax.fitting import FitSpec, Slot, fit_phantom_lm, lm_minimize
+from bmc_jax.fitting import FitSpec, FreeParam, fit_batch, levenberg_marquardt
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import (convert_params, cw_saturation, get_initial_magnetization,
-                                simulate_spectrum)
+from bmc_jax.simulation import to_sim_params, initial_state, simulate_spectrum
+from bmc_jax.sequences import cw_saturation
 
 PPM = np.linspace(-6.0, 6.0, 41)
 LADDER = (0.5, 1.0, 1.5, 2.0)          # uT -- a QUESP ladder
@@ -34,28 +34,28 @@ def _experiment():
     FLUX k*f, not its two factors -- fitting k and f from one level is not slow, it is impossible.
     """
     p = example_config("amide")
-    jp = convert_params(p)
+    jp = to_sim_params(p)
     events = jax.tree.map(lambda *a: jnp.concatenate(a, axis=0),
                           *[cw_saturation(PPM, b1_uT=b, tsat_s=2.0, b0_T=p.system.b0)
                             for b in LADDER])
     n = K_TRUE.size
     base = jax.tree.map(lambda a: jnp.broadcast_to(jnp.asarray(a), (n,) + jnp.asarray(a).shape), jp)
     base = base._replace(cest_k=jnp.asarray(K_TRUE[:, None], jnp.float32))
-    M0 = jnp.stack([get_initial_magnetization(jax.tree.map(lambda a, i=i: a[i], base))
+    M0 = jnp.stack([initial_state(jax.tree.map(lambda a, i=i: a[i], base))
                     for i in range(n)])
     Z = jnp.stack([simulate_spectrum(jax.tree.map(lambda a, i=i: a[i], base), events, M0[i],
                                      return_full_trajectory=False)[:, p.mz_loc] for i in range(n)])
     return p, base, events, M0, Z
 
 
-SPEC = FitSpec([Slot("k", "cest_k", 0, scale=100.0, lo=5.0, hi=2000.0, x0=150.0),
-                Slot("f", "cest_f", 0, scale=0.001, lo=1e-5, hi=0.01, x0=0.0005)])
+SPEC = FitSpec([FreeParam("k", "cest_k", 0, scale=100.0, lo=5.0, hi=2000.0, x0=150.0),
+                FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-5, hi=0.01, x0=0.0005)])
 
 
 @pytest.fixture(scope="module")
 def fitted():
     p, base, events, M0, Z = _experiment()
-    X = np.asarray(fit_phantom_lm(base, events, M0, p.mz_loc, SPEC, Z,
+    X = np.asarray(fit_batch(base, events, M0, p.mz_loc, SPEC, Z,
                                   n_iter=30, skip_first=False, base_batched=True))
     return p, X
 
@@ -87,7 +87,7 @@ def test_bounds_are_respected(fitted):
     assert (X[:, 1] >= SPEC.lo_phys[1]).all() and (X[:, 1] <= SPEC.hi_phys[1]).all()
 
 
-def test_lm_minimize_works_without_any_physics():
+def test_levenberg_marquardt_works_without_any_physics():
     """The optimiser is a general bounded least-squares routine. Prove it on Rosenbrock.
 
     If this needs anything from the solver, optimize.py is not really a separate layer.
@@ -95,6 +95,6 @@ def test_lm_minimize_works_without_any_physics():
     def resid(x):
         return jnp.array([10.0 * (x[1] - x[0] ** 2), 1.0 - x[0]])
 
-    x = np.asarray(lm_minimize(resid, jnp.array([-1.2, 1.0]), jnp.array([-5.0, -5.0]),
+    x = np.asarray(levenberg_marquardt(resid, jnp.array([-1.2, 1.0]), jnp.array([-5.0, -5.0]),
                                jnp.array([5.0, 5.0]), n_iter=200))
     assert np.allclose(x, [1.0, 1.0], atol=1e-3), f"converged to {x}, expected (1, 1)"

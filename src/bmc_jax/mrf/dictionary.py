@@ -1,10 +1,10 @@
 """
 MRF dictionary generation on top of the voxel-batched BMC simulator.
 
-A "dictionary entry" is exactly a voxel in voxel_simulator.py's sense: one
-JAXParams instance run against one shared MRF acquisition sequence. This
-module only adds what voxel_simulator.py doesn't have -- turning a
-{field_name: values} sweep into the batched JAXParams that `simulate_voxels`
+A "dictionary entry" is exactly a voxel in simulation.voxels's sense: one
+SimParams instance run against one shared MRF acquisition sequence. This
+module only adds what simulation/voxels.py doesn't have -- turning a
+{field_name: values} sweep into the batched SimParams that `simulate_voxels`
 expects, plus chunking so a large Cartesian grid doesn't have to fit in GPU
 memory in one call.
 """
@@ -14,27 +14,27 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .param_adapter import JAXParams
-from .simulator import SimEvent
-from .voxel_simulator import simulate_voxels, extract_z_spectra
+from ..simulation.params import SimParams
+from ..simulation.events import SimEvent
+from ..simulation.voxels import simulate_voxels, extract_z_spectra
 
 
-def build_param_grid(base_params: JAXParams, grid: Dict[str, Sequence[float]]) -> JAXParams:
+def build_param_grid(base_params: SimParams, grid: Dict[str, Sequence[float]]) -> SimParams:
     """
-    Cartesian-product a sweep of JAXParams fields into one batched JAXParams.
+    Cartesian-product a sweep of SimParams fields into one batched SimParams.
 
     Args:
-        base_params: a single-tissue JAXParams (e.g. from case_loader.load_case)
+        base_params: a single-tissue SimParams (e.g. from case_loader.load_case)
                       supplying every field NOT being swept.
         grid: {field_name: 1D array_like of values}. field_name must name a
-              JAXParams field that is a scalar or a single-element array in
+              SimParams field that is a scalar or a single-element array in
               base_params (e.g. "water_r1", "mt_k", or "cest_k"/"cest_f"/...
               only when there is exactly one CEST pool). Sweeping one pool of
               a multi-pool field isn't supported here -- pass the full
               per-entry array yourself if you need that.
 
     Returns:
-        JAXParams with every field broadcast to a leading axis of length
+        SimParams with every field broadcast to a leading axis of length
         prod(len(v) for v in grid.values()), ready for `simulate_voxels`.
     """
     if not grid:
@@ -67,7 +67,7 @@ def build_param_grid(base_params: JAXParams, grid: Dict[str, Sequence[float]]) -
 
 
 def generate_dictionary(
-    base_params: JAXParams,
+    base_params: SimParams,
     seq_base: SimEvent,
     M_init: jnp.ndarray,
     grid: Dict[str, Sequence[float]],
@@ -81,7 +81,7 @@ def generate_dictionary(
     GPU memory allows in one vmap call).
 
     Args:
-        base_params: single-tissue JAXParams for every field not in `grid`.
+        base_params: single-tissue SimParams for every field not in `grid`.
         seq_base: the shared MRF acquisition sequence (n_offsets, n_events).
         M_init: initial magnetization vector, shape (vector_size,).
         grid: sweep spec, see `build_param_grid`.

@@ -9,10 +9,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from bmc_jax.fitting import Experiment, pad_events
+from bmc_jax.fitting import Experiment
+from bmc_jax.simulation import pad_events
 from bmc_jax.io import example_config
-from bmc_jax.jax_solver import (EventType, SimEvent, convert_params, cw_saturation,
-                                get_initial_magnetization, simulate_spectrum)
+from bmc_jax.simulation import EventType, SimEvent, to_sim_params, initial_state, simulate_spectrum
+from bmc_jax.sequences import cw_saturation
 
 PPM = np.linspace(-5.0, 5.0, 21)
 
@@ -20,9 +21,9 @@ PPM = np.linspace(-5.0, 5.0, 21)
 def experiment_at(tsat_s, b1_uT=1.0, name="amide"):
     """One CW saturation experiment. Longer tsat does NOT mean more events here -- see below."""
     p = example_config(name)
-    jp = convert_params(p)
+    jp = to_sim_params(p)
     ev = cw_saturation(PPM, b1_uT=b1_uT, tsat_s=tsat_s, b0_T=p.system.b0)
-    return Experiment(jp, ev, get_initial_magnetization(jp), p.mz_loc)
+    return Experiment(jp, ev, initial_state(jp), p.mz_loc)
 
 
 def test_front_padding_changes_nothing():
