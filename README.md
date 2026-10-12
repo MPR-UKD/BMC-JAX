@@ -226,7 +226,7 @@ so fit in float32 and re-check anything that turns on a smaller difference with
 ## Tests
 
 ```bash
-pytest                    # 104 tests, the docstring examples included
+pytest                    # 112 tests, the docstring examples included
 ```
 
 | | checks |
