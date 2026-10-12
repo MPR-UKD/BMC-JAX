@@ -16,9 +16,14 @@ dist/
 examples/*.png
 examples/*.seq
 
-# ...but the phantom measurement tutorials 08 and 09 fit is not generated output. It is the
-# input to the fit -- 0.9 MB of Z-spectra and converted sequences -- and must ship, or those
-# two tutorials do not run for anyone who clones this.
+# ...but the phantom measurement tutorials 08 to 11 fit is not generated output. It is the
+# input to the fit -- Z-spectra and converted sequences, about 1 MB -- and must ship, or those
+# tutorials do not run for anyone who clones this.
 !examples/data/*.npz
 !examples/data/events/*.npz
 !examples/data/seqs/*.seq
+# ...and so is the rest of that scan: the sequences as played, the reconstructed images and the
+# maps (about 125 MB; every file below GitHub's 50 MB warning size).
+!examples/data/scan_2026-09-27/*.npz
+!examples/data/scan_2026-09-27/seqs_played/*.seq
+!examples/data/scan_2026-09-27/reko/*.npz

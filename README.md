@@ -187,7 +187,7 @@ The layout and several names changed, with no aliases kept: update imports with 
 
 ## Tutorials
 
-Nine scripts in [`examples/`](examples/), each runnable on its own; 01–07 need no data files, 08 and 09
+Eleven scripts in [`examples/`](examples/), each runnable on its own; 01–07 need no data files, 08–11
 fit the phantom measurement that ships in `examples/data/`:
 
 | | |
@@ -201,6 +201,8 @@ fit the phantom measurement that ships in `examples/data/`:
 | `07_many_voxels.py` | a slice, with per-voxel calibration held fixed |
 | `08_quesp.py` | QUESP on real phantom data |
 | `09_quest.py` | QUEST on the same phantom |
+| `10_shared_water.py` | `fit_joint`: a water R2 factor, the start state and the B0 spread, shared by the tubes |
+| `11_per_rung.py` | a B1 factor per rung of the ladder, shared by the tubes, and how to read it |
 
 ## Two things worth knowing before you trust a number
 
@@ -250,10 +252,10 @@ variable pointing somewhere else, no optional package standing between you and a
 The package itself depends on numpy and jax and nothing more.
 
 The heaviest end-to-end check is not a test but a tutorial. `examples/08_quesp.py` fits a real
-phantom measurement that ships with it -- four tubes, a seven-rung saturation ladder -- and takes
-a few minutes. Two of those tubes hold the same solution at the same concentration, so their
-fitted pool sizes have to agree, which is the one check there that no calibration error can
-satisfy by accident.
+phantom measurement that ships with it -- seven tubes, an eight-rung saturation ladder -- and takes
+a few minutes. Its tubes come in pairs of known pool-size ratio (2 for GAG at two concentrations, 1
+for one solution at two pH), which is the check there that no calibration error can satisfy by
+accident.
 
 ## License
 
