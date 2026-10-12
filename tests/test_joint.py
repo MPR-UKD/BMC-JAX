@@ -206,3 +206,110 @@ def test_fit_refuses_factors_offsets_start_state_and_blocks(amide, extra):
     p, jp, true, events, m0, z = amide
     with pytest.raises(ValueError, match="fit_joint"):
         fit(Experiment(true, events, m0, p.mz_loc), FitSpec([K, extra]), z)
+
+
+# ---- the B0 spread inside a sample ----------------------------------------------------------------------
+
+from bmc_jax.simulation import B0Spread, simulate_spectrum_spread  # noqa: E402
+
+SIGMA = FreeParam("sig", "b0_spread", None, scale=10.0, lo=0.0, hi=60.0, x0=10.0, scope="shared")
+B1F = FreeParam("b1f", "rel_b1", None, scale=1.0, lo=0.7, hi=1.3, x0=1.0, scope="block", mode="factor")
+_one = lambda b, i: jax.tree.map(lambda a: a[i], b)
+
+
+@pytest.mark.parametrize("shape", ["gauss", "lorentz"])
+def test_a_spread_of_zero_width_is_one_isochromat(amide, shape):
+    p, jp, true, events, m0, z = amide
+    a = simulate_spectrum(_one(true, 0), events, m0[0], return_full_trajectory=False)
+    b = simulate_spectrum_spread(_one(true, 0), events, m0[0], 0.0, B0Spread(shape=shape, nodes=5))
+    np.testing.assert_allclose(b, a, rtol=0, atol=2e-6)
+
+
+def test_spread_nodes_and_weights():
+    """Gauss: weights sum to 1, SD 1. Lorentz cut at +-c: E[1 / (1 + u^2)] = 1/2 + sin(2T) / 4T, T = atan(c)."""
+    u, w = B0Spread(shape="gauss", nodes=5).nodes_weights()
+    assert w.sum() == pytest.approx(1.0) and np.sum(w * u ** 2) == pytest.approx(1.0)
+    u, w = B0Spread(shape="lorentz", nodes=9, cut=20.0).nodes_weights()
+    T = np.arctan(20.0)
+    assert np.sum(w / (1 + u ** 2)) == pytest.approx(0.5 + np.sin(2 * T) / (4 * T), rel=1e-10)
+    assert np.all(w > 0) and np.allclose(u, -u[::-1])
+    with pytest.raises(ValueError, match="shape"):
+        B0Spread(shape="box")
+
+
+def test_a_node_is_the_sample_shifted_by_sigma(amide):
+    """Two Gauss-Hermite nodes sit at +-1 sigma with weight 1/2: the mean of the sample shifted by +-sigma (Hz,
+    converted with the sample's own field: 42.58 Hz per ppm per tesla)."""
+    p, jp, true, events, m0, z = amide
+    one = _one(true, 0)
+    hz = float(one.gamma * one.b0 / (2 * np.pi))
+    assert hz == pytest.approx(42.577 * float(one.b0), rel=1e-3)
+    s = 12.0
+    sh = lambda d: simulate_spectrum(one._replace(b0_inhom=one.b0_inhom + d), events, m0[0],
+                                     return_full_trajectory=False)
+    two = simulate_spectrum_spread(one, events, m0[0], s, B0Spread(nodes=2))
+    np.testing.assert_allclose(two, 0.5 * (sh(s / hz) + sh(-s / hz)), rtol=0, atol=2e-6)
+
+
+def test_a_held_spread_per_sample(amide):
+    """No b0_spread slot: every sample simulated with its own given width, nothing fitted."""
+    p, jp, true, events, m0, z = amide
+    sp = B0Spread(sigma_hz=(0.0, 10.0, 30.0))
+    x0 = np.array([[40.0, 0.0009009], [120.0, 0.0009009], [300.0, 0.0009009]])     # the truth: model = data's params
+    d = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F]), z, x0_phys=x0, spread=sp,
+                  _internals=True)
+    zm = np.asarray(d["resid"](d["x0"])).reshape(z.shape) + np.asarray(z)
+    for i, s in enumerate(sp.sigma_hz):           # 1e-5: k and f pass through x / scale * scale in float32
+        want = simulate_spectrum_spread(_one(true, i), events, m0[i], s, sp)[:, p.mz_loc]
+        np.testing.assert_allclose(zm[i], want, rtol=0, atol=1e-5)
+
+
+def test_a_shared_spread_is_recovered(amide):
+    """Data with a 25 Hz Gaussian spread in every sample; one width fitted from 10 Hz, with k and f."""
+    p, jp, true, events, m0, z = amide
+    sp = B0Spread(nodes=5)
+    z2 = jnp.stack([simulate_spectrum_spread(_one(true, i), events, m0[i], 25.0, sp)[:, p.mz_loc] for i in range(3)])
+    res = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F, SIGMA]), z2, n_iter=30, spread=sp)
+    assert res["sig"][0] == pytest.approx(25.0, rel=2e-2)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+
+
+def test_b0_spread_needs_fit_joint_and_a_spread(amide):
+    p, jp, true, events, m0, z = amide
+    exp = Experiment(true, events, m0, p.mz_loc)
+    with pytest.raises(ValueError, match="fit_joint"):
+        fit(exp, FitSpec([K, SIGMA]), z)
+    with pytest.raises(ValueError, match="spread"):
+        fit_joint(exp, FitSpec([K, SIGMA]), z, n_iter=1)
+    with pytest.raises(ValueError, match="b0_spread"):
+        FreeParam("s", "b0_spread", None, 1.0, 0.0, 1.0, 0.5, mode="factor")
+
+
+# ---- the assembled Jacobian is the derivative, for every kind of value ----------------------------------
+
+M_SOME = FreeParam("m0", "m_start", None, scale=1.0, lo=0.1, hi=1.0, x0=0.9, samples=(0, 1))
+JAC_CASES = {                       # slots, spread, blocks ("full" / "split" / None), chunk
+    "plain": ([K, F], None, None, None),
+    "shared": ([K, F, R2W], None, None, None),
+    "factor + start state": ([K, F, R2_FACTOR, M_SHARED], None, None, None),
+    "some samples": ([K, F, M_SOME], None, None, None),
+    "block offset": ([K, F, DB0], None, "full", None),
+    "block offset, split": ([K, F, DB0], None, "split", None),
+    "block factor + shared, split": ([K, F, B1F, R2W], None, "split", None),
+    "spread": ([K, F, SIGMA], B0Spread(nodes=3), None, None),
+    "block + spread, split, chunked": ([K, F, B1F, SIGMA], B0Spread(nodes=3, shape="lorentz"), "split", 1),
+}
+
+
+@pytest.mark.parametrize("case", list(JAC_CASES))
+def test_the_joint_jacobian_is_the_derivative(amide, case):
+    """fit_joint builds its Jacobian per sample and scatters it ("split": a per-block slot as ONE tangent split by
+    rows). It must equal jax.jacfwd of the whole residual, column by column, away from the start."""
+    p, jp, true, events, m0, z = amide
+    slots, sp, blocks, chunk = JAC_CASES[case]
+    d = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec(slots), z, spread=sp, max_chunk=chunk,
+                  n_per_block=PPM.size if blocks else None, block_jacobian=blocks or "full", _internals=True)
+    x = d["x0"] + 0.02 * jnp.linspace(-1.0, 1.0, d["x0"].size, dtype=d["x0"].dtype)
+    J, Ja = np.asarray(d["jac"](x)), np.asarray(jax.jacfwd(d["resid"])(x))
+    rel = np.linalg.norm(J - Ja, axis=0) / np.maximum(np.linalg.norm(Ja, axis=0), 1e-30)
+    assert rel.max() < 1e-4, f"{case}: columns {np.flatnonzero(rel >= 1e-4)} off by {rel.max():.1e}"

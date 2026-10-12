@@ -13,10 +13,20 @@ The field "m_start" is the magnetisation the sequence starts from, as a fraction
 value, it rebuilds each sample's start state from its current pools at every step; as a factor, it scales
 the start state the experiment carries.
 
+THE B0 SPREAD INSIDE A SAMPLE. With `spread=B0Spread(...)` every sample is simulated as `spread.nodes`
+isochromats around its own B0 and averaged (bmc_jax.simulation.spread). Its width is the field "b0_spread"
+(Hz): free like any value -- usually one shared by every sample -- or, without a slot, held at
+`spread.sigma_hz` (a number, or one per sample). Without `spread` nothing changes.
+
 HOW IT STAYS CHEAP. It is one least-squares problem over every free value, but a sample's residual depends
 only on its own values and the shared ones. So the Jacobian is built per sample, for that sample's slots
-only -- one forward tangent per slot (per block for a per-block slot), not one per joint column -- and then
-scattered into the joint matrix.
+only -- one forward tangent per slot, not one per joint column -- and then scattered into the joint
+matrix. A per-block slot costs one tangent per block by default (`block_jacobian="full"`). With
+`block_jacobian="split"` it costs ONE: a rung's points depend only on that rung's value, so the derivative
+along "every block at once" is split into its blocks' rows afterwards. Both are exact (checked against
+`jax.jacfwd` of the whole residual in tests/test_joint.py); they differ in float32 rounding only, which is
+enough to send a badly conditioned coupled fit along a different path to a different stall (seen on a
+noise-free test: k 39.98 vs 42.15 at cost 1.7e-6 vs 2.2e-6). "full" keeps every earlier number.
 
 THE OPTIMISER is `levenberg_marquardt`'s damped Gauss-Newton (lam x0.5 on accept, x3 on reject, the step
 clipped to the bounds). Without a shared or per-block value the problem is block diagonal and every sample
@@ -36,11 +46,14 @@ import jax.numpy as jnp
 
 from ..simulation.params import SimParams, initial_state
 from ..simulation.simulate import simulate_spectrum
+from ..simulation.spread import simulate_spectrum_spread
 from ..simulation.voxels import tile_params
 from .lm import levenberg_marquardt
 from .result import FitResult
 
 M_START = "m_start"
+B0_SPREAD = "b0_spread"
+PSEUDO = (M_START, B0_SPREAD)          # free values that are not SimParams fields
 
 
 def _layout(spec, n, n_blocks):
@@ -72,13 +85,16 @@ def _layout(spec, n, n_blocks):
     return free, pos, int(sum(width)), G, cols
 
 
-def _carried(params, m0, spec):
+def _carried(params, m0, spec, sig_held=None):
     """(n, L): what each slot's number is where it is not free -- the field's value, 1 for a factor,
-    0 for an offset, and for m_start the start state's water Mz over its equilibrium."""
+    0 for an offset, for m_start the start state's water Mz over its equilibrium, for b0_spread the held
+    width."""
     out = []
     n = m0.shape[0]
     for s in spec.slots:
-        if s.mode == "factor":
+        if s.field == B0_SPREAD:
+            out.append(jnp.asarray(sig_held, m0.dtype))
+        elif s.mode == "factor":
             out.append(jnp.ones(n, m0.dtype))
         elif s.mode == "add":
             out.append(jnp.zeros(n, m0.dtype))
@@ -96,6 +112,8 @@ def _apply(p, m0_i, eff, free_i, spec):
     for l, s in enumerate(spec.slots):
         if s.field == M_START:
             m_slot = l
+            continue
+        if s.field == B0_SPREAD:                       # not a SimParams field: the model reads it
             continue
         cur = upd.get(s.field, getattr(p, s.field))
         old = cur if s.index is None else cur[s.index]
@@ -118,7 +136,7 @@ def _cov_to_sd_corr(cov, scale):
 
 
 def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, max_chunk=None,
-              lam0=1e-2, callback=None):
+              lam0=1e-2, callback=None, spread=None, block_jacobian="full", _internals=False):
     """Fit `spec`'s parameters of every sample at once: shared, per-block and partly free values allowed.
 
     Parameters
@@ -144,6 +162,16 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
         Starting damping.
     callback
         Called as `callback(step, cost)` after every step of a coupled fit (progress of a long run).
+    spread
+        A :class:`~bmc_jax.simulation.spread.B0Spread`: simulate every sample as that many isochromats
+        around its own B0 and average them. Its width is the slot "b0_spread" (Hz) where one is given,
+        `spread.sigma_hz` elsewhere. None (default): one isochromat, as before.
+    block_jacobian
+        "full" (default): one forward tangent per block of a per-block slot, as before. "split": one per
+        slot, split into its blocks' rows afterwards -- cheaper by the number of blocks, the same derivative
+        up to rounding (see the module notes).
+    _internals
+        Tests only: return the residual, the Jacobian and the start instead of fitting.
 
     Returns
     -------
@@ -188,10 +216,19 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
     dt = params.water_r1.dtype
     z = z.astype(dt)
     events, mz = experiment.events, experiment.mz_loc
-    unknown = [s.name for s in spec.slots if s.field != M_START and s.field not in SimParams._fields]
+    unknown = [s.name for s in spec.slots if s.field not in PSEUDO and s.field not in SimParams._fields]
     if unknown:
-        raise ValueError(f"{unknown}: not a SimParams field nor {M_START!r}")
+        raise ValueError(f"{unknown}: not a SimParams field nor one of {PSEUDO}")
+    l_sp = [l for l, s in enumerate(spec.slots) if s.field == B0_SPREAD]
+    if l_sp and spread is None:
+        raise ValueError(f"{[spec.slots[l].name for l in l_sp]}: b0_spread needs fit_joint(..., spread=B0Spread(...))")
+    if len(l_sp) > 1:
+        raise ValueError(f"{[spec.slots[l].name for l in l_sp]}: one b0_spread slot at most")
+    l_sp = l_sp[0] if l_sp else None
+    sig_held = None if spread is None else jnp.broadcast_to(jnp.asarray(spread.sigma_hz, dt), (n,))
 
+    if block_jacobian not in ("full", "split"):
+        raise ValueError(f"block_jacobian {block_jacobian!r}; use 'full' or 'split'")
     blocked = any(s.scope == "block" for s in spec.slots)
     if blocked and (not n_per_block or n_pts % n_per_block):
         raise ValueError(f"a per-block value needs n_per_block dividing the {n_pts} offsets (got {n_per_block})")
@@ -201,7 +238,9 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
     L = spec.n
     scales = np.array([s.scale for s in spec.slots])
     is_block = np.array([s.scope == "block" for s in spec.slots])
-    carried = _carried(params, m0, spec).astype(dt)
+    carried = _carried(params, m0, spec, sig_held).astype(dt)
+    # what the model is handed per sample: the carried values, then (with a spread) the held width
+    carried_in = carried if spread is None else jnp.concatenate([carried, sig_held[:, None]], axis=1)
     X0 = (np.broadcast_to(spec.x0_phys, free.shape) if x0_phys is None else np.asarray(x0_phys, float))
     if X0.shape != free.shape:
         raise ValueError(f"x0_phys has shape {X0.shape}, expected {free.shape} (samples, parameters)")
@@ -210,34 +249,70 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
     spans = [(a, min(a + max_chunk, n)) for a in range(0, n, max_chunk)] if max_chunk else [(0, n)]
     cut = lambda tree, a, b: jax.tree.map(lambda v: v[a:b], tree)
 
+    def simulate(q, ev, m, e, car_i):                # one sample, one set of events -> Z
+        if spread is None:
+            return simulate_spectrum(q, ev, m, return_full_trajectory=False)[:, mz]
+        sig = e[l_sp] if l_sp is not None else car_i[L]
+        return simulate_spectrum_spread(q, ev, m, sig, spread)[:, mz]
+
     if not blocked:
         def model(loc, p, m0_i, free_i, car_i):      # one sample: its scaled slot values -> Z
-            eff = jnp.where(free_i, (loc * spec.scales).astype(dt), car_i)
+            eff = jnp.where(free_i, (loc * spec.scales).astype(dt), car_i if spread is None else car_i[:L])
             q, m = _apply(p, m0_i, eff, free_i, spec)
-            return simulate_spectrum(q, events, m, return_full_trajectory=False)[:, mz]
+            return simulate(q, events, m, eff, car_i)
         vjl = jax.jit(jax.vmap(jax.jacfwd(model)))  # (samples, points, slots): per sample, its own slots
     else:
         idx = np.array([[pos[l] + (b if is_block[l] else 0) for l in range(L)] for b in range(nb)])
         ev_b = jax.tree.map(lambda a: a.reshape((nb, n_per_block) + a.shape[1:]), events)
 
         def model(loc, p, m0_i, free_i, car_i):      # every block with its own per-block numbers
-            eff = jnp.where(free_i, (loc[idx] * spec.scales).astype(dt), car_i)      # (blocks, slots)
+            cs = car_i if spread is None else car_i[:L]
+            eff = jnp.where(free_i, (loc[idx] * spec.scales).astype(dt), cs)      # (blocks, slots)
 
             def one(e, ev):
                 q, m = _apply(p, m0_i, e, free_i, spec)
-                return simulate_spectrum(q, ev, m, return_full_trajectory=False)[:, mz]
+                return simulate(q, ev, m, e, car_i)
             return jax.vmap(one)(eff, ev_b).reshape(-1)
 
-        # jacfwd over every local entry, a block slot's blocks included. One tangent per slot, split into its
-        # blocks' rows afterwards, would be cheaper; but under jit a jvp along tangent directions captured as
-        # a constant came out wrong (jax 0.6.2, CPU, 2026-10-07) while jacfwd and the same jvp without jit
-        # were right. Correct first.
-        vjl = jax.jit(jax.vmap(jax.jacfwd(model)))
+        if block_jacobian == "full":
+            # jacfwd over every local entry, a block slot's blocks included (under jit a jvp along tangent
+            # directions captured as a constant came out wrong, jax 0.6.2 CPU, 2026-10-07; jacfwd was right)
+            vjl = jax.jit(jax.vmap(jax.jacfwd(model)))
+        else:
+            # ONE tangent per slot: d moves every local entry of slot l together (E); block b's points depend
+            # only on block b's entry, so W keeps of that derivative the rows of block b for entry pos+b.
+            # jacfwd's own basis, no tangent captured as a constant; checked against "full" in the tests.
+            E = np.zeros((L, n_loc))
+            W = np.zeros((n_pts, L, n_loc))
+            for l in range(L):
+                for b in (range(nb) if is_block[l] else [0]):
+                    E[l, pos[l] + b] = 1.0
+                    rows = slice(b * n_per_block, (b + 1) * n_per_block) if is_block[l] else slice(None)
+                    W[rows, l, pos[l] + b] = 1.0
+            Ej, Wj = jnp.asarray(E, dt), jnp.asarray(W, dt)
+
+            def jloc(loc, p, m0_i, free_i, car_i):    # (points, local entries)
+                md = lambda d: model(loc + d @ Ej, p, m0_i, free_i, car_i)
+                return jnp.einsum("nl,nlj->nj", jax.jacfwd(md)(jnp.zeros(L, dt)), Wj)
+            vjl = jax.jit(jax.vmap(jloc))
     vz = jax.jit(jax.vmap(model))
 
     def per_sample(fn, loc):
-        return jnp.concatenate([fn(loc[a:b], cut(params, a, b), m0[a:b], fr[a:b], carried[a:b])
+        return jnp.concatenate([fn(loc[a:b], cut(params, a, b), m0[a:b], fr[a:b], carried_in[a:b])
                                 for a, b in spans])
+
+    Gj = jnp.asarray(G, dt)
+    locs = lambda x: jnp.einsum("ijp,p->ij", Gj, x)
+
+    def resid_all(x):                                  # every sample's residual, from the joint vector
+        return (jax.vmap(model)(locs(x), params, m0, fr, carried_in) - z).reshape(-1)
+
+    def jac_all(x):                                    # the joint Jacobian, assembled per sample
+        return jnp.einsum("inj,ijp->inp", per_sample(vjl, locs(x)), Gj).reshape(-1, P)
+
+    if _internals:
+        x_start = jnp.asarray([X0[who[0], l] / scales[l] for l, who, _ in cols], dt)
+        return dict(resid=resid_all, jac=jac_all, x0=x_start, cols=cols, model=model, locs=locs)
 
     coupled = any(s.scope in ("shared", "block") for s in spec.slots)
     nan_steps = 0
@@ -253,25 +328,19 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
                                        return_trajectory=True, free=h_i)
         vsolve = jax.vmap(solve, in_axes=(0, 0, 0, 0, 0, 0, None if hold is None else 0))
         X0s = jnp.asarray(X0 / scales, dt)
-        outs = [vsolve(cut(params, a, b), m0[a:b], fr[a:b], carried[a:b], z[a:b], X0s[a:b],
+        outs = [vsolve(cut(params, a, b), m0[a:b], fr[a:b], carried_in[a:b], z[a:b], X0s[a:b],
                        None if hold is None else hold[a:b]) for a, b in spans]
         loc = jnp.concatenate([o[0] for o in outs])
         cost = np.asarray(jnp.concatenate([o[2] for o in outs]), float).sum(axis=0)
     else:
         # coupled: one joint step over every free value, one damping
-        Gj = jnp.asarray(G, dt)
-        locs = lambda x: jnp.einsum("ijp,p->ij", Gj, x)
         col_slot = np.array([l for l, _, _ in cols], int)
         col_scale = scales[col_slot]
         lo = jnp.asarray(spec.lo_phys[col_slot] / col_scale, dt)
         hi = jnp.asarray(spec.hi_phys[col_slot] / col_scale, dt)
         eye = jnp.eye(P, dtype=dt)
 
-        def resid(x):
-            return (jax.vmap(model)(locs(x), params, m0, fr, carried) - z).reshape(-1)
-
-        def jac(x):
-            return jnp.einsum("inj,ijp->inp", per_sample(vjl, locs(x)), Gj).reshape(-1, P)
+        resid, jac = resid_all, jac_all
 
         @jax.jit
         def step(x, lam, J, r):

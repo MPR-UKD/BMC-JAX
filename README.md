@@ -85,6 +85,7 @@ bmc_jax/
 │   ├── expm.py              one time step, with either matrix exponential (see settings)
 │   ├── simulate.py          scan over time, vmap over offsets
 │   ├── voxels.py            batched over voxels, with per-voxel parameters
+│   ├── spread.py            the B0 spread inside a sample: isochromats, averaged (B0Spread)
 │   └── multigpu.py          spread a batch across every local GPU
 ├── sequences/
 │   ├── saturation.py        build a saturation sequence in code, with no file at all
@@ -135,8 +136,20 @@ of a stacked ladder (`"block"`). `mode` replaces the carried value (the default)
 (`"factor"`) or shifts it (`"add"`). `"m_start"` is not a SimParams field but the magnetisation the
 sequence starts from; free as a value, the start state is rebuilt from the current pools at every step.
 
+**The B0 spread inside a sample.** `simulate_spectrum` follows one isochromat; a real voxel or tube holds
+spins a few Hz apart, and under a pulsed train a single isochromat rings where the measurement does not.
+`fit_joint(..., spread=B0Spread(sigma_hz, shape="gauss" | "lorentz", nodes=5))` simulates every sample as
+`nodes` isochromats around its own B0 and averages them; the width is the field `"b0_spread"` (Hz), fitted
+like any value -- usually one shared by all samples -- or held at `sigma_hz`. The fitted width depends on
+the node count (an effective width), so keep `nodes` fixed when comparing fits. `simulate_spectrum_spread`
+is the same average outside a fit.
+
 Where a value is not free, the sample keeps what its params carry, exactly. The Jacobian is built per
-sample, for that sample's own parameters, so a shared value costs one more column, not another fit.
+sample, for that sample's own parameters, so a shared value costs one more column, not another fit. A
+per-block slot costs one forward tangent per block; `block_jacobian="split"` builds it from one tangent
+and splits it by rung (the same derivative up to float32 rounding -- which can still send a badly
+conditioned coupled fit to a different stall, so the default keeps the earlier numbers). Every way of
+building it is checked against `jax.jacfwd` of the whole residual in `test_joint.py`.
 Error bars (`res.sd`) and correlations (`res.corr`) come from the Jacobian at the solution, scaled by
 the misfit. With a plain spec `fit_joint` gives `fit`'s numbers, and `fit` refuses a spec it cannot
 honour rather than ignoring `scope` or `samples`.
@@ -211,7 +224,7 @@ so fit in float32 and re-check anything that turns on a smaller difference with
 ## Tests
 
 ```bash
-pytest                    # 90 tests, the docstring examples included
+pytest                    # 104 tests, the docstring examples included
 ```
 
 | | checks |
@@ -219,7 +232,7 @@ pytest                    # 90 tests, the docstring examples included
 | `test_solver.py` | physics invariants of the forward model |
 | `test_experiment.py` | stacking experiments, and the padding that makes it safe |
 | `test_fitting.py` | simulate, then fit the parameters back |
-| `test_joint.py` | the same with shared values and a pool in some samples only; a plain spec gives `fit`'s numbers |
+| `test_joint.py` | the same with shared values and a pool in some samples only; a plain spec gives `fit`'s numbers; the B0 spread; the assembled Jacobian against `jax.jacfwd` for every kind of value |
 | `test_config.py` | reading a Pulseq-CEST config |
 | `test_structure.py` | the package's own layering rules |
 
