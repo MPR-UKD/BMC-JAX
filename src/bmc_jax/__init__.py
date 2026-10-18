@@ -33,4 +33,4 @@ README has the old -> new table.
 """
 from . import settings                                     # noqa: F401  bmc_jax.settings.use_expm(...)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
