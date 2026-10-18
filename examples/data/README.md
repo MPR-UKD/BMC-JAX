@@ -21,8 +21,8 @@ any absolute concentration.
 | tube | name | contents | pH | pool offset | `f_nominal` |
 |---|---|---|---|---|---|
 | 0 | `PBS` | phosphate-buffered saline | 7.76 | none | 0 |
-| 1 | `GAG100_pH6.31` | chondroitin sulfate 100 mg/mL | 6.31 | 1.0 ppm, hydroxyl | 5.37 × 10⁻³ |
-| 2 | `GAG50_pH6.20` | chondroitin sulfate 50 mg/mL | 6.20 | 1.0 ppm, hydroxyl | 2.69 × 10⁻³ |
+| 1 | `GAG100_pH6.31` | chondroitin sulfate 100 mg/mL | 6.31 | 1.0 ppm, hydroxyl | 5.43 × 10⁻³ |
+| 2 | `GAG50_pH6.20` | chondroitin sulfate 50 mg/mL | 6.20 | 1.0 ppm, hydroxyl | 2.72 × 10⁻³ |
 | 3 | `creatine_pH7.51` | creatine 90 mM | 7.51 | 1.9 ppm, guanidinium | 3.24 × 10⁻³ |
 | 4 | `creatine_pH6.31` | creatine 90 mM | 6.31 | 1.9 ppm, guanidinium | 3.24 × 10⁻³ |
 | 5 | `carnosine_pH6.59` | carnosine 50 mM | 6.59 | 3.2 ppm, amide | 4.5 × 10⁻⁴ |
@@ -33,10 +33,10 @@ the ratio 2. The two creatine tubes are one solution at two pH, and so are the t
 so each of those ratios must be 1. A calibration error shared by both tubes of a pair cancels in the
 ratio; that is what makes these checks worth more than any absolute number.
 
-`f_nominal` is the concentration on the label times the labile protons per molecule (creatine 4,
+`f_nominal` is the prepared concentration times the labile protons per molecule (creatine 4,
 GAG 3 per disaccharide unit, carnosine 1) over 111 M, the proton concentration of water. GAG is chondroitin
-sulfate sodium salt, converted at 503 g/mol per disaccharide unit. The masses were not recorded, so it is
-nominal: good for ratios, not a weighed truth.
+sulfate sodium salt, converted at 497.4 g/mol per disaccharide unit, the formula (C₁₄H₂₀NNaO₁₅S)ₙ given by the
+manufacturer.
 
 Each pH was measured once, the day before the scan. The phantom was at 21.9 to 22.0 °C before the
 first scan and 22.4 to 22.5 °C after the last, 4 h 46 min later.

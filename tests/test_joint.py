@@ -304,12 +304,15 @@ JAC_CASES = {                       # slots, spread, blocks ("full" / "split" / 
 @pytest.mark.parametrize("case", list(JAC_CASES))
 def test_the_joint_jacobian_is_the_derivative(amide, case):
     """fit_joint builds its Jacobian per sample and scatters it ("split": a per-block slot as ONE tangent split by
-    rows). It must equal jax.jacfwd of the whole residual, column by column, away from the start."""
+    rows). It must equal jax.jacfwd of the whole residual, column by column, away from the start.
+    Full matmul precision: by default a GPU multiplies float32 matrices in TF32, and the two Jacobians, built in a
+    different order, then differ by ~2e-4 (RTX 3070) for no fault of the assembly. On CPU this changes nothing."""
     p, jp, true, events, m0, z = amide
     slots, sp, blocks, chunk = JAC_CASES[case]
-    d = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec(slots), z, spread=sp, max_chunk=chunk,
-                  n_per_block=PPM.size if blocks else None, block_jacobian=blocks or "full", _internals=True)
-    x = d["x0"] + 0.02 * jnp.linspace(-1.0, 1.0, d["x0"].size, dtype=d["x0"].dtype)
-    J, Ja = np.asarray(d["jac"](x)), np.asarray(jax.jacfwd(d["resid"])(x))
+    with jax.default_matmul_precision("highest"):
+        d = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec(slots), z, spread=sp, max_chunk=chunk,
+                      n_per_block=PPM.size if blocks else None, block_jacobian=blocks or "full", _internals=True)
+        x = d["x0"] + 0.02 * jnp.linspace(-1.0, 1.0, d["x0"].size, dtype=d["x0"].dtype)
+        J, Ja = np.asarray(d["jac"](x)), np.asarray(jax.jacfwd(d["resid"])(x))
     rel = np.linalg.norm(J - Ja, axis=0) / np.maximum(np.linalg.norm(Ja, axis=0), 1e-30)
     assert rel.max() < 1e-4, f"{case}: columns {np.flatnonzero(rel >= 1e-4)} off by {rel.max():.1e}"

@@ -75,7 +75,7 @@ for i, name in enumerate(names):
           f"{res.rms[i] / noise[i]:>10.1f}  {bound}")
 
 # Absolute pool sizes depend on things no fit sees (purity, labile protons per molecule, the
-# concentration on the label). A ratio within a pair does not: GAG at 100 and 50 mg/mL must give 2,
+# molar mass). A ratio within a pair does not: GAG at 100 and 50 mg/mL must give 2,
 # and the same creatine or carnosine solution at two pH must give 1. Worth more than any single
 # absolute number above.
 print()
