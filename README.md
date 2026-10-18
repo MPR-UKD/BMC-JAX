@@ -2,12 +2,24 @@
 
 Differentiable Bloch–McConnell simulation and quantitative CEST fitting, in JAX.
 
-Simulate a Z-spectrum from a pool model, and fit exchange rates and pool sizes back out of
-measured data — on GPU, with exact Jacobians from automatic differentiation rather than finite
-differences.
+BMC-JAX simulates a Z-spectrum from a pool model and a Pulseq sequence, and fits exchange rates and
+pool sizes back out of measured data. It runs on a GPU, and the Jacobian of the fit comes from
+automatic differentiation instead of finite differences.
+
+![Data flow for one Z-spectrum](docs/figures/dataflow.png)
+
+*One Z-spectrum: the magnetisation is propagated through the sequence events one after the other
+(`jax.lax.scan`), at all frequency offsets at once (`jax.vmap`). The same graph gives the Jacobian.*
+
+## Install
 
 ```bash
-pip install -e .
+git clone https://github.com/MPR-UKD/BMC-JAX.git
+cd BMC-JAX
+pip install -e .                 # core: jax + numpy only
+pip install -e ".[pulseq]"       # + pypulseq, to read and write .seq files
+pip install -e ".[reference]"    # + bmctool, to compare against the CPU reference
+pip install -e ".[dev]"          # + pytest
 ```
 
 ## Quickstart
@@ -45,217 +57,43 @@ sample             k             f        rms
 
 ## How it works
 
-The Bloch–McConnell system is affine, `dM/dt = A M + b`. Augmenting the state with a constant
-unity component folds `b` into the matrix, so a time step is **one matrix exponential and never a
-matrix inversion**:
+The Bloch–McConnell equations are affine, `dM/dt = A M + b`. Adding a constant 1 to the state puts
+`b` into the matrix, so every time step is one matrix exponential and no matrix inversion:
 
 ```
 [ M ]'     [ A  b ] [ M ]
 [ 1 ]   =  [ 0  0 ] [ 1 ]
 ```
 
-Two levels of parallelism carry the cost: `jax.vmap` runs every saturation offset at once, and
-`jax.lax.scan` compiles the time evolution within each offset into a single XLA loop.
+The same kernel is then wrapped in more and more axes: the sequence events, the frequency offsets,
+the voxels and the GPUs. Every level stays differentiable.
 
-Because the whole forward model is JAX, the derivative of a Z-spectrum with respect to any
-physical parameter comes from autodiff. That is what makes gradient-based fitting and
-Cramér–Rao bounds cheap, and it is the difference from a simulator you can only evaluate.
-
-## Install
-
-```bash
-pip install -e .                 # core: jax + numpy only
-pip install -e ".[pulseq]"       # + pypulseq, to read and write .seq
-pip install -e ".[reference]"    # + bmctool, for cross-validation against the CPU reference
-pip install -e ".[dev]"          # + pytest
-```
-
-The core depends on **jax and numpy and nothing else**. Everything that reads a file format, or
-validates against another implementation, is an optional extra, so an install cannot fail on a
-dependency the simulator does not use.
+![Batching axes around the kernel](docs/figures/batching_axes.png)
 
 ## What is in it
 
-```
-bmc_jax/
-├── simulation/          the forward model
-│   ├── params.py            pools -> SimParams, the static array layout JIT needs; initial_state
-│   ├── events.py            SimEvent, EventType, padding and casting of event blocks
-│   ├── matrix.py            the Bloch–McConnell matrix in homogeneous coordinates
-│   ├── expm.py              one time step, with either matrix exponential (see settings)
-│   ├── simulate.py          scan over time, vmap over offsets
-│   ├── voxels.py            batched over voxels, with per-voxel parameters
-│   ├── spread.py            the B0 spread inside a sample: isochromats, averaged (B0Spread)
-│   └── multigpu.py          spread a batch across every local GPU
-├── sequences/
-│   ├── saturation.py        build a saturation sequence in code, with no file at all
-│   └── pulseq.py            or read a Pulseq .seq
-├── fitting/
-│   ├── experiment.py        what is simulated         (Experiment, Experiment.stack)
-│   ├── params.py            which parameters are free (FitSpec, FreeParam)
-│   ├── residual.py          what is compared
-│   ├── lm.py                bounded Levenberg–Marquardt, usable on its own
-│   ├── independent.py       every sample on its own: one spectrum, many voxels, or many GPUs
-│   ├── joint.py             samples together: shared values, values free in some samples only
-│   └── result.py            FitResult: values, residual per rung, bounds hit
-├── io/                      Pulseq-CEST YAML, as plain frozen dataclasses
-├── mrf/                     MR-fingerprinting dictionaries from the simulator
-└── settings.py              use_x64 (float precision), use_expm (which matrix exponential)
-```
-
-Nothing about any particular agent is hardcoded. A `FitSpec` names fields and pool indices;
-which pools exist and what they are called belongs to the model, not to the fitter.
-
-`lm.py` does not import the simulation, so `levenberg_marquardt` is a general bounded least-squares
-routine you can use for anything. That boundary is enforced by a test, not by convention.
-
-### Fitting samples together
-
-`fit` solves every sample alone. When the samples have something in common, or a pool exists in only
-some of them, use `fit_joint` and say so in the spec:
-
-```python
-from bmc_jax.fitting import FitSpec, FreeParam, fit_joint
-
-spec = FitSpec([
-    FreeParam("k", "cest_k", 0, 100.0, 5.0, 2000.0, 300.0),                     # one per sample
-    FreeParam("f", "cest_f", 0, 0.001, 1e-5, 0.03, 0.005),
-    FreeParam("r2f", "water_r2", None, 1.0, 0.5, 1.5, 1.0,                      # one factor on every
-              scope="shared", mode="factor"),                                  # sample's measured R2
-    FreeParam("m0", "m_start", None, 1.0, 0.1, 1.0, 0.6, scope="shared"),        # the start state
-    FreeParam("db0", "b0_inhom", None, 0.01, -0.1, 0.1, 0.0,                     # a B0 drift per rung,
-              scope="block", mode="add"),                                      # on top of the B0 map
-    FreeParam("f_noe", "cest_f", 1, 0.001, 0.0, 0.03, 0.002, samples=(0, 1)),   # only where it exists
-])
-res = fit_joint(ladder, spec, Z, n_per_block=len(ppm))
-res["r2f"], res["db0"], res.sd, res.free
-```
-
-`scope` is one value per sample (the default), one for all of them (`"shared"`) or one per experiment
-of a stacked ladder (`"block"`). `mode` replaces the carried value (the default), multiplies it
-(`"factor"`) or shifts it (`"add"`). `"m_start"` is not a SimParams field but the magnetisation the
-sequence starts from; free as a value, the start state is rebuilt from the current pools at every step.
-
-**The B0 spread inside a sample.** `simulate_spectrum` follows one isochromat; a real voxel or tube holds
-spins a few Hz apart, and under a pulsed train a single isochromat rings where the measurement does not.
-`fit_joint(..., spread=B0Spread(sigma_hz, shape="gauss" | "lorentz", nodes=5))` simulates every sample as
-`nodes` isochromats around its own B0 and averages them; the width is the field `"b0_spread"` (Hz), fitted
-like any value -- usually one shared by all samples -- or held at `sigma_hz`. The fitted width depends on
-the node count (an effective width), so keep `nodes` fixed when comparing fits. `simulate_spectrum_spread`
-is the same average outside a fit.
-
-Where a value is not free, the sample keeps what its params carry, exactly. The Jacobian is built per
-sample, for that sample's own parameters, so a shared value costs one more column, not another fit. A
-per-block slot costs one forward tangent per block; `block_jacobian="split"` builds it from one tangent
-and splits it by rung (the same derivative up to float32 rounding -- which can still send a badly
-conditioned coupled fit to a different stall, so the default keeps the earlier numbers). Every way of
-building it is checked against `jax.jacfwd` of the whole residual in `test_joint.py`.
-Error bars (`res.sd`) and correlations (`res.corr`) come from the Jacobian at the solution, scaled by
-the misfit. With a plain spec `fit_joint` gives `fit`'s numbers, and `fit` refuses a spec it cannot
-honour rather than ignoring `scope` or `samples`.
-
-### Two matrix exponentials
-
-Every time step is one matrix exponential. `bmc_jax.settings.use_expm` picks how it is computed:
-
-```python
-import bmc_jax
-bmc_jax.settings.use_expm("library")   # default: jax.scipy.linalg.expm (cuBLAS / cuSOLVER on a GPU)
-bmc_jax.settings.use_expm("plain")     # the same float32 algorithm, written out: no library call
-```
-
-Both give the same answer to float32 rounding. "plain" exists because, on some GPU batch shapes,
-the library calls inside `expm` returned NaN or wrong slopes in a vmapped Jacobian while the
-residual itself was fine. `simulation/expm.py` has the details.
-
-### Renamed in 2026-10
-
-The layout and several names changed, with no aliases kept: update imports with this table.
-
-| before | now |
+| folder | what it does |
 |---|---|
-| `bmc_jax.jax_solver` | `bmc_jax.simulation`, `bmc_jax.sequences`, `bmc_jax.mrf` |
-| `JAXParams`, `convert_params` | `SimParams`, `to_sim_params` |
-| `get_initial_magnetization(p, scale=)` | `initial_state(p, m_start=)` |
-| `build_bmc_matrix_and_vector`, `solve_step` | `bmc_matrix`, `propagate` |
-| `convert_sequence(_batch)` | `events_from_seq(_batch)` |
-| `Slot`, `apply_x` | `FreeParam`, `write_params` |
-| `lm_minimize` | `levenberg_marquardt` |
-| `make_single_residual`, `make_phantom_residual` | `residual_one`, `residual_batch` |
-| `fit_voxel`, `fit_phantom_lm(_sharded)`, `fit_phantom_adam` | `fit_one`, `fit_batch(_sharded)`, `fit_batch_adam` |
-| `bmc_jax.precision.configure_x64` | `bmc_jax.settings.use_x64` |
+| `simulation/` | the forward model: pools, the matrix, one time step, a spectrum, many voxels, the B0 spread |
+| `sequences/` | a saturation sequence built in code, or read from a Pulseq `.seq` file |
+| `fitting/` | `fit` (every sample alone) and `fit_joint` (samples with shared values), Levenberg–Marquardt |
+| `io/` | Pulseq-CEST YAML configs |
+| `mrf/` | MR fingerprinting dictionaries |
+| `settings.py` | float32 or float64, and which matrix exponential |
 
 ## Tutorials
 
-Eleven scripts in [`examples/`](examples/), each runnable on its own; 01–07 need no data files, 08–11
-fit the phantom measurement that ships in `examples/data/`:
+Eleven scripts in [`examples/`](examples/). Tutorials 01 to 07 build everything in code. Tutorials
+08 to 11 fit a real seven-tube phantom measurement that ships in [`examples/data/`](examples/data/).
+The list is in [`examples/README.md`](examples/README.md).
 
-| | |
-|---|---|
-| `01_pools.py` | build water, CEST and MT pools in code and from YAML |
-| `02_simulate.py` | pools to Z-spectrum; why MTRasym is not a clean per-pool measure |
-| `03_seq_file.py` | write a real `.seq`, read it back, simulate it |
-| `04_fit_one.py` | fit k and f from one saturation level — and find where that quietly fails |
-| `05_fit_ladder.py` | the QUESP ladder |
-| `06_quest.py` | the saturation-time ladder, and QUESP vs QUEST as a cross-check |
-| `07_many_voxels.py` | a slice, with per-voxel calibration held fixed |
-| `08_quesp.py` | QUESP on real phantom data |
-| `09_quest.py` | QUEST on the same phantom |
-| `10_shared_water.py` | `fit_joint`: a water R2 factor, the start state and the B0 spread, shared by the tubes |
-| `11_per_rung.py` | a B1 factor per rung of the ladder, shared by the tubes, and how to read it |
+## More
 
-## Two things worth knowing before you trust a number
-
-**A `k` from one saturation level may not be a measurement of `k`.** Saturation efficiency is
-`alpha = w1² / (w1² + k(k + R2s))`, and it is the lever the fit uses to separate an exchange rate
-from a pool size. Where `alpha` is near 1 the pool is already saturated and raising `k` changes
-nothing; where it is near 0 almost nothing is saturated. Either way the lever is short and noise
-fills the gap. On otherwise identical data with 0.2 % noise, the same fit is 3 % wrong at
-`k = 500 Hz` and 104 % wrong at `k = 50 Hz` — converged, no bounds hit, healthy residual, both
-times. `04_fit_one.py` reproduces this; `05_fit_ladder.py` shows what a ladder recovers and what
-it does not.
-
-**float32 fitting is reproducible to about a percent.** Changing the batch size changes the
-kernel XLA compiles, float32 reductions are not associative, and a k/f fit is close enough to
-singular that a ~1e-7 difference in the Jacobian moves the result by ~1 % in `k`. Measured: 1.1e-2
-relative between one shot and `max_chunk=32`, against 1.8e-7 in float64. That is well below the
-error noise imposes — on 0.2 % noise, float32 and float64 land 2.147 % and 2.054 % from truth —
-so fit in float32 and re-check anything that turns on a smaller difference with
-`bmc_jax.settings.use_x64(True)`.
-
-## Tests
-
-```bash
-pytest                    # 112 tests, the docstring examples included
-```
-
-| | checks |
-|---|---|
-| `test_solver.py` | physics invariants of the forward model |
-| `test_experiment.py` | stacking experiments, and the padding that makes it safe |
-| `test_fitting.py` | simulate, then fit the parameters back |
-| `test_joint.py` | the same with shared values and a pool in some samples only; a plain spec gives `fit`'s numbers; the B0 spread; the assembled Jacobian against `jax.jacfwd` for every kind of value |
-| `test_config.py` | reading a Pulseq-CEST config |
-| `test_structure.py` | the package's own layering rules |
-
-`test_solver.py` asserts what is true of *any* correct Bloch–McConnell implementation — the far
-wing returns to 1, a pool-free spectrum is even in ppm, a pool at `+dw` dips only on its own side,
-`k = 0` transfers no label, saturation deepens with both power and time, and the dip stays at the
-same ppm at 1.5, 2.9 and 7 T. A stored reference spectrum would only check that the code still
-does what it did; these check that what it does is right, and they need no data files.
-
-Docstring examples run as tests, so an example that stops being true fails the build rather than
-misleading the next reader.
-
-Every test runs from a clean clone, and every one of them runs: no skips, no environment
-variable pointing somewhere else, no optional package standing between you and a green suite.
-The package itself depends on numpy and jax and nothing more.
-
-The heaviest end-to-end check is not a test but a tutorial. `examples/08_quesp.py` fits a real
-phantom measurement that ships with it -- seven tubes, an eight-rung saturation ladder -- and takes
-a few minutes. Its tubes come in pairs of known pool-size ratio (2 for GAG at two concentrations, 1
-for one solution at two pH), which is the check there that no calibration error can satisfy by
-accident.
+- [`docs/guide.md`](docs/guide.md): fitting samples together, the B0 spread, the two matrix
+  exponentials, and what to know before you trust a number.
+- [`tests/README.md`](tests/README.md): what the 112 tests check. Run them with `pytest`.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed between versions, with the table of renamed functions
+  for code written for 0.1.0.
 
 ## License
 
