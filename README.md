@@ -162,8 +162,6 @@ Pulseq-CEST is described in:
 > reproducibility of CEST experiments using an open-source sequence standard. Magn Reson Med.
 > 2021;86(4):1845-1858. https://doi.org/10.1002/mrm.28825
 
-This work was supported by the Deutsche Forschungsgemeinschaft (DFG) under grant number 530863408.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
