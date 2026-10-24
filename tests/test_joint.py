@@ -76,8 +76,10 @@ def test_a_plain_spec_gives_fits_numbers(amide):
     exp = Experiment(true, events, m0, p.mz_loc)
     spec = FitSpec([K, F])
     a, b = fit(exp, spec, z, n_iter=20), fit_joint(exp, spec, z, n_iter=20)
-    np.testing.assert_allclose(b.x, a.x, rtol=1e-6, atol=0)
-    np.testing.assert_allclose(b.z_fit, a.z_fit, rtol=1e-6, atol=1e-7)
+    # The two compile different float32 kernels. On JAX 0.7.2 (CPU) the slowest sample, the worst
+    # conditioned, moved by 1.7e-4 relative; a different algorithm would move every sample far more.
+    np.testing.assert_allclose(b.x, a.x, rtol=1e-3, atol=0)
+    np.testing.assert_allclose(b.z_fit, a.z_fit, rtol=0, atol=1e-5)
     assert b.free.all() and np.isfinite(b.sd).all()
 
 
@@ -259,9 +261,9 @@ def test_a_held_spread_per_sample(amide):
     d = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F]), z, x0_phys=x0, spread=sp,
                   _internals=True)
     zm = np.asarray(d["resid"](d["x0"])).reshape(z.shape) + np.asarray(z)
-    for i, s in enumerate(sp.sigma_hz):           # 1e-5: k and f pass through x / scale * scale in float32
-        want = simulate_spectrum_spread(_one(true, i), events, m0[i], s, sp)[:, p.mz_loc]
-        np.testing.assert_allclose(zm[i], want, rtol=0, atol=1e-5)
+    for i, s in enumerate(sp.sigma_hz):           # float32: k and f pass through x / scale * scale, and the
+        want = simulate_spectrum_spread(_one(true, i), events, m0[i], s, sp)[:, p.mz_loc]   # kernels differ
+        np.testing.assert_allclose(zm[i], want, rtol=0, atol=1e-4)                          # (1.9e-5 on JAX 0.7.2)
 
 
 def test_a_shared_spread_is_recovered(amide):
