@@ -1,9 +1,13 @@
-# Guide
+# User guide
 
-## Fitting samples together
+This guide covers joint fits of several samples, the B0 spread inside a sample, the choice of
+matrix exponential, and the limits of a fitted exchange rate. For a first introduction, see the
+[README](../README.md) and the [tutorials](../examples/README.md).
 
-`fit` solves every sample alone. When the samples have something in common, or a pool exists in only
-some of them, use `fit_joint` and say so in the spec:
+## Joint fits
+
+`fit` solves every sample independently. When samples share parameters, or when a pool exists in
+only some of them, use `fit_joint` and declare this in the fit specification:
 
 ```python
 from bmc_jax.fitting import FitSpec, FreeParam, fit_joint
@@ -22,62 +26,78 @@ res = fit_joint(ladder, spec, Z, n_per_block=len(ppm))
 res["r2f"], res["db0"], res.sd, res.free
 ```
 
-- `scope`: one value per sample (the default), one for all samples (`"shared"`), or one per
-  experiment of a stacked ladder (`"block"`).
-- `mode`: replace the carried value (the default), multiply it (`"factor"`) or shift it (`"add"`).
-- `"m_start"` is not a SimParams field but the magnetisation the sequence starts from. When it is
-  free as a value, the start state is rebuilt from the current pools at every step.
+Options of `FreeParam`:
 
-Where a value is not free, the sample keeps what its params carry. The Jacobian is built per sample,
-for that sample's own parameters, so a shared value costs one more column and not another fit. A
-per-block value costs one forward tangent per block. `block_jacobian="split"` builds it from one
-tangent and splits it by rung. That is the same derivative up to float32 rounding, but it can still
-send a badly conditioned coupled fit to a different stall, so the default keeps the earlier numbers.
-Every way of building the Jacobian is checked against `jax.jacfwd` of the whole residual in
+| Option | Values |
+|---|---|
+| `scope` | `"sample"` (default): one value per sample. `"shared"`: one value for all samples. `"block"`: one value per experiment of a stacked ladder. |
+| `mode` | `"value"` (default): replaces the stored value. `"factor"`: multiplies it. `"add"`: shifts it. |
+| `samples` | the samples in which the parameter is free. All other samples keep their stored value. |
+
+`"m_start"` is not a field of `SimParams` but the magnetisation from which the sequence starts. When
+it is free as a value, the start state is rebuilt from the current pools at every step.
+
+Parameters that are not free keep the values stored in each sample's parameters. The Jacobian is
+built per sample, for that sample's own parameters, so a shared parameter adds one column and not a
+separate fit. A per-block parameter adds one forward tangent per block. With
+`block_jacobian="split"`, the per-block columns are built from a single tangent and split by rung.
+The derivative is the same up to float32 rounding, but in a poorly conditioned coupled fit the
+different rounding can lead to a different stopping point. The default therefore keeps the earlier
+behaviour. Every way of building the Jacobian is checked against `jax.jacfwd` of the full residual in
 `tests/test_joint.py`.
 
-Error bars (`res.sd`) and correlations (`res.corr`) come from the Jacobian at the solution, scaled by
-the misfit. With a plain spec, `fit_joint` gives the same numbers as `fit`. `fit` refuses a spec it
-cannot honour instead of ignoring `scope` or `samples`.
+Error bars (`res.sd`) and correlations (`res.corr`) are computed from the Jacobian at the solution
+and scaled by the misfit. For a specification without shared or partial parameters, `fit_joint`
+returns the same values as `fit`. `fit` rejects a specification it cannot honour instead of ignoring
+`scope` or `samples`.
 
-## The B0 spread inside a sample
+## B0 spread inside a sample
 
-`simulate_spectrum` follows one isochromat. A real voxel or tube holds spins a few Hz apart, and under
-a pulsed train a single isochromat rings where the measurement does not.
+`simulate_spectrum` follows a single isochromat. A real voxel or tube contains spins a few Hz apart,
+and under a pulsed saturation train a single isochromat shows oscillations that the measurement does
+not.
 
 `fit_joint(..., spread=B0Spread(sigma_hz, shape="gauss" | "lorentz", nodes=5))` simulates every
 sample as `nodes` isochromats around its own B0 and averages them. The width is the field
-`"b0_spread"` (Hz). It is fitted like any other value, usually one shared by all samples, or held at
-`sigma_hz`. The fitted width depends on the number of nodes (it is an effective width), so keep
-`nodes` fixed when you compare fits. `simulate_spectrum_spread` is the same average outside a fit.
+`"b0_spread"` (Hz). It can be fitted like any other parameter, usually as one value shared by all
+samples, or held at `sigma_hz`. The fitted width depends on the number of nodes and is therefore an
+effective width. Keep `nodes` fixed when comparing fits. `simulate_spectrum_spread` computes the same
+average outside a fit.
 
-## Two matrix exponentials
+## Matrix exponential
 
-Every time step is one matrix exponential. `bmc_jax.settings.use_expm` picks how it is computed:
+Every time step is one matrix exponential. `bmc_jax.settings.use_expm` selects how it is computed:
 
 ```python
 import bmc_jax
 bmc_jax.settings.use_expm("library")   # default: jax.scipy.linalg.expm (cuBLAS / cuSOLVER on a GPU)
-bmc_jax.settings.use_expm("plain")     # the same float32 algorithm, written out: no library call
+bmc_jax.settings.use_expm("plain")     # the same float32 algorithm, written out without library calls
 ```
 
-Both give the same answer to float32 rounding. "plain" exists because, for some GPU batch shapes,
-the library calls inside `expm` returned NaN or wrong slopes in a vmapped Jacobian while the
-residual itself was fine. `simulation/expm.py` has the details.
+Both give the same result up to float32 rounding. The `"plain"` option exists because, for some GPU
+batch shapes, the library calls inside `expm` returned NaN or incorrect derivatives in a vmapped
+Jacobian, while the residual itself was correct. Details are given in `simulation/expm.py`.
 
-## Before you trust a number
+## Limits of a fitted exchange rate
 
-**A `k` from one saturation level may not be a measurement of `k`.** The saturation efficiency
-`alpha = w1² / (w1² + k(k + R2s))` is what lets the fit separate an exchange rate from a pool size.
-Where `alpha` is near 1 the pool is already saturated, and where it is near 0 almost nothing is
-saturated. In both cases noise fills the gap. On the same data with 0.2 % noise, the same fit is 3 %
-wrong at `k = 500 Hz` and 104 % wrong at `k = 50 Hz`, converged, with no bounds hit and a healthy
-residual both times. `examples/04_fit_one.py` shows this, and `examples/05_fit_ladder.py` shows what
-a ladder recovers.
+**An exchange rate fitted from one saturation level is not always a measurement of k.** The
+saturation efficiency
 
-**float32 fitting is reproducible to about a percent.** A different batch size compiles a different
-kernel, float32 sums depend on their order, and a k/f fit is close enough to singular that a 1e-7
-difference in the Jacobian moves `k` by about 1 %. Measured: 1.1e-2 relative between one shot and
-`max_chunk=32`, against 1.8e-7 in float64. That is well below the error from noise (on 0.2 % noise,
-float32 and float64 land 2.147 % and 2.054 % from the truth). So fit in float32, and re-check
-anything that depends on a smaller difference with `bmc_jax.settings.use_x64(True)`.
+```text
+alpha = w1^2 / (w1^2 + k (k + R2s))
+```
+
+is what allows a fit to separate the exchange rate from the pool size. When `alpha` is close to 1,
+the pool is already saturated. When it is close to 0, the pool is hardly saturated. In both cases
+noise dominates the difference. On the same data with 0.2 % noise, the same fit is 3 % off at
+k = 500 s⁻¹ and 104 % off at k = 50 s⁻¹, although it converges, hits no bound and leaves an
+unremarkable residual in both cases. `examples/04_fit_one.py` demonstrates this, and
+`examples/05_fit_ladder.py` shows what a ladder of saturation amplitudes recovers.
+
+**float32 fits are reproducible to about one percent.** A different batch size compiles a different
+kernel, float32 sums depend on their order, and a k/f fit is close enough to singular that a
+difference of 1e-7 in the Jacobian moves k by about 1 %. Measured: 1.1e-2 relative difference
+between one batch and `max_chunk=32`, against 1.8e-7 in float64. This is well below the error caused
+by noise: with 0.2 % noise, float32 and float64 fits land 2.147 % and 2.054 % from the true value.
+Fit in float32, and check results that depend on smaller differences with
+`bmc_jax.settings.use_x64(True)`.
