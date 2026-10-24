@@ -5,12 +5,15 @@ This module handles the parsing of PyPulseq sequence objects and transforms them
 into a flat list of simulation events (SimEvent) that can be processed by the
 JAX solver.
 """
+from __future__ import annotations
 
 import numpy as np
-import pypulseq as pp
 from types import SimpleNamespace
-from typing import Tuple, Optional
+from typing import TYPE_CHECKING, Tuple, Optional
 import jax.numpy as jnp
+
+if TYPE_CHECKING:                 # pypulseq is optional: the caller passes a Sequence it already built
+    import pypulseq as pp
 
 from ..simulation.events import SimEvent, EventType
 

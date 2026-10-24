@@ -23,7 +23,7 @@ what it did. These check that what it does is right, and they need no data files
 The docstring examples run as tests, so an example that stops being true fails the suite.
 
 Every test runs from a clean clone, with no skips, no environment variables and no optional
-packages. The package itself depends on numpy and jax only.
+packages. The package itself depends on numpy, jax and pyyaml only.
 
 The Jacobian check in `test_joint.py` runs at full matmul precision. On a GPU, float32 matrix
 products use TF32 by default, and the two Jacobians, built in a different order, would then differ

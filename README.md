@@ -29,7 +29,7 @@ and the Jacobian of the fit is obtained by automatic differentiation of the solv
 
 ## Installation
 
-Requirements: Python 3.10 or later, NumPy and JAX 0.6 or later.
+Requirements: Python 3.10 or later, NumPy, PyYAML and JAX 0.6 or later.
 
 ```bash
 git clone https://github.com/MPR-UKD/BMC-JAX.git

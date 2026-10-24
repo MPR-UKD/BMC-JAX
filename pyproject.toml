@@ -20,10 +20,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 
-# The core is jax + numpy and nothing else. Everything that reads a file format or
-# validates against another implementation is optional, so `pip install bmc-jax` can
-# never fail on a dependency the simulator does not use.
-dependencies = ["numpy", "jax>=0.6"]
+# The core is jax + numpy, plus pyyaml for the Pulseq-CEST model configs (example_config,
+# from_yaml). Everything that reads a sequence file or validates against another
+# implementation is optional, so `pip install bmc-jax` never pulls in a package the
+# simulator does not use.
+dependencies = ["numpy", "jax>=0.6", "pyyaml"]
 
 [project.urls]
 Homepage = "https://github.com/MPR-UKD/BMC-JAX"
