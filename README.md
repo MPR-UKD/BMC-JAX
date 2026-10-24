@@ -156,6 +156,12 @@ BMC-JAX builds on two open-source projects:
   code and its configuration format, and BMCTool serves as the reference implementation in the
   validation.
 
+Pulseq-CEST is described in:
+
+> Herz K, Mueller S, Perlman O, et al. Pulseq-CEST: Towards multi-site multi-vendor compatibility and
+> reproducibility of CEST experiments using an open-source sequence standard. Magn Reson Med.
+> 2021;86(4):1845-1858. https://doi.org/10.1002/mrm.28825
+
 This work was supported by the Deutsche Forschungsgemeinschaft (DFG) under grant number 530863408.
 
 ## License
