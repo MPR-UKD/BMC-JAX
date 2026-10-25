@@ -1,9 +1,25 @@
-"""02 -- From pools to a Z-spectrum.
+"""Tutorial 02: Simulating a Z-spectrum
 
-A Z-spectrum is one number per saturation offset: how much water signal is left after saturating
-at that frequency. Everything CEST does is read off this curve.
+A Z-spectrum gives the water signal that remains after saturation, normalised to the unsaturated
+signal, as a function of the saturation frequency offset from water (in ppm). It shows a dip at
+water (direct water saturation) and a smaller dip at the chemical shift of every exchanging pool
+(the CEST effect). Quantitative CEST analysis works on this curve.
 
-Run:  python 02_simulate.py          (add --plot for a figure, needs matplotlib)
+This tutorial
+  1. loads a model with water, an amide pool (+3.5 ppm), an NOE pool (-3.0 ppm) and an MT pool;
+  2. builds a continuous-wave saturation sequence in code with cw_saturation();
+  3. simulates the Z-spectrum with simulate_spectrum();
+  4. computes the asymmetry MTRasym(dw) = Z(-dw) - Z(+dw), and shows why it does not measure a single
+     pool when pools lie on both sides of water;
+  5. removes one pool at a time to show what each pool contributes.
+
+The two parameters of the saturation, the amplitude B1 and the saturation time Tsat, are the two
+axes of quantitative CEST: varying B1 gives a QUESP experiment (tutorial 05), varying Tsat a QUEST
+experiment (tutorial 06).
+
+Requirements: the core package; matplotlib for the optional figure.
+
+Run:  python 02_simulate.py          (add --plot to save a figure, needs matplotlib)
 """
 import sys
 
@@ -25,26 +41,26 @@ ppm = np.linspace(-6.0, 6.0, 121)
 # The sequence
 # ---------------------------------------------------------------------------------------------
 # cw_saturation builds the events in code: one continuous-wave block per offset, then a readout.
-# No .seq file and nothing on disk. (03_seq_file.py does the same thing from a real Pulseq file.)
+# No .seq file is needed. (Tutorial 03 does the same from a Pulseq file.)
 #
-# Two knobs, and they are the two axes of quantitative CEST:
-#   b1_uT   saturation POWER  -- sweeping this is a QUESP experiment
-#   tsat_s  saturation TIME   -- sweeping this is a QUEST experiment
+# The two parameters of the saturation:
+#   b1_uT   saturation amplitude; varying it gives a QUESP experiment
+#   tsat_s  saturation time; varying it gives a QUEST experiment
 
 events = cw_saturation(ppm, b1_uT=1.0, tsat_s=2.0, b0_T=params.system.b0)
 print(f"sequence: {events.dt.shape[0]} offsets x {events.dt.shape[1]} events")
 
-# params.mz_loc is the index of water's Mz in the solver's state vector. Never hardcode it:
-# it depends on how many pools the model has, so a constant silently reads the wrong pool the
-# moment the model changes.
+# params.mz_loc is the index of the water Mz in the solver's state vector. Do not replace it by a
+# constant: it depends on the number of pools, and a fixed index would read the wrong pool as soon
+# as the model changes.
 z = np.asarray(simulate_spectrum(jax_params, events, m0, return_full_trajectory=False)[:, params.mz_loc])
 
 # ---------------------------------------------------------------------------------------------
-# Reading it
+# Reading the spectrum
 # ---------------------------------------------------------------------------------------------
-# MTRasym is the classic contrast: how much deeper the spectrum is on one side than the other.
-# It is NOT a clean measure of one pool -- an NOE at -3.0 ppm subtracts directly from an amide
-# at +3.5 ppm, which is visible below.
+# MTRasym is the classic CEST contrast: the difference between the two sides of the spectrum. It is
+# not a measure of a single pool. An NOE pool at -3.0 ppm reduces the asymmetry of an amide pool at
+# +3.5 ppm, as the numbers below show.
 
 mtr_asym = z[::-1] - z
 
@@ -62,8 +78,8 @@ for i in range(0, len(ppm), 6):
 # ---------------------------------------------------------------------------------------------
 # One pool at a time
 # ---------------------------------------------------------------------------------------------
-# Removing a pool and re-simulating shows what that pool actually contributes -- far more
-# informative than staring at the total.
+# Removing one pool and simulating again shows the contribution of that pool to the total
+# spectrum.
 
 from dataclasses import replace
 
@@ -84,4 +100,4 @@ if "--plot" in sys.argv:
     plt.tight_layout(); plt.savefig("02_zspectrum.png", dpi=120)
     print("\nwrote 02_zspectrum.png")
 
-print("\nNext: 03_seq_file.py -- the same, driven by a real Pulseq .seq file.")
+print("\nNext: 03_seq_file.py, the same simulation driven by a Pulseq .seq file.")

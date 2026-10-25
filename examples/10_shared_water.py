@@ -1,22 +1,33 @@
-"""10 -- Seven tubes, one water: fit what the tubes have in common.
+"""Tutorial 10: Joint fit with water parameters shared by all tubes
 
-Tutorial 08 fitted each tube's k, f and pool T2 and held everything about the water fixed: water R2
-from the PBS tube, the start magnetisation fitted once to PBS alone, and every tube at one single
-frequency. All three are properties the tubes SHARE -- the same solvent, the same sequence, the same
-magnet. `fit_joint` fits them from the spectra themselves, one value for all seven tubes (PBS
-included), together with every pool tube's own k, f and pool T2:
+In tutorial 08, every tube was fitted on its own, and three properties of the water were held
+fixed: the water R2 (from the PBS tube), the start magnetisation M_start (fitted once to the PBS
+tube alone), and a single frequency per tube, without a spread of B0 within the tube. All tubes
+contain the same buffer and were measured with the same sequence in the same magnet, so these three
+properties are shared by all tubes. fit_joint() fits them from the spectra, as one value for all
+seven tubes (PBS included), together with k, f and the pool T2 of every tube with a CEST pool:
 
-  water R2   one factor over the PBS value each tube carries     (scope "shared", mode "factor")
-  M_start    the magnetisation the sequence starts from          (field "m_start", shared)
-  B0 spread  the width of the field spread inside a tube, in Hz  (field "b0_spread", shared,
-             with spread=B0Spread(...): every tube simulated as 15 isochromats and averaged)
+  water R2    one factor applied to the PBS value of every tube    (scope="shared", mode="factor")
+  M_start     the start magnetisation of the sequence               (field "m_start", scope="shared")
+  B0 spread   the width (Hz) of the B0 distribution within a tube   (field "b0_spread", scope="shared")
 
-A shared value costs one column in the joint fit but is constrained by all seven tubes at once, which
-is what makes it measurable: no single tube could tell a water R2 error from its own k and f. PBS,
-which has no pool, constrains the water alone; its k and f are not free (`samples` leaves it out).
+The B0 spread is modelled with B0Spread(nodes=15): every tube is simulated at 15 frequencies around
+its mean B0, and the spectra are averaged with Gauss-Hermite weights. The width is bounded at 8 Hz.
 
-Run:  python 10_shared_water.py          (about 1.5 h on one RTX 3070: the spread costs 15 simulations per
-                                          tube and step, and the joint fit runs 12 steps)
+A shared parameter adds one column to the Jacobian and is constrained by all tubes at once. This is
+what makes it measurable: a single tube cannot separate an error of the water R2 from its own k and
+f. The PBS tube has no CEST pool and constrains the water parameters alone. Its k and f are not
+fitted, which FreeParam(samples=...) expresses.
+
+This tutorial
+  1. runs the fit of tutorial 08 (water held fixed) to obtain start values;
+  2. runs the joint fit, 12 Levenberg-Marquardt steps, with the shared water parameters free;
+  3. compares the two fits tube by tube, the residual per amplitude, and the pair checks.
+
+Requirements: the core package; the data ship in examples/data/. Runtime: about 1.5 h on one
+RTX 3070, because the B0 spread costs 15 simulations per tube and step.
+
+Run:  python 10_shared_water.py
 """
 import sys
 from dataclasses import replace
@@ -60,15 +71,17 @@ ladder6, Z6 = quesp(load_data(tubes=pool))
 plain = fit(ladder6, FitSpec([K, F, T2]), Z6, n_iter=60, n_per_block=n_per)
 
 # ---------------------------------------------------------------------------------------------
-# 2. The same, plus what the tubes share
+# 2. The same fit, with the shared water parameters free
 # ---------------------------------------------------------------------------------------------
-# The shared slots start at the values tutorial 08 held: factor 1 on the PBS R2, M_start from PBS.
-# The pool slots are free in the pool tubes only and start at step 1's answer.
+# The shared parameters start at the values that tutorial 08 held fixed: a factor of 1 on the PBS
+# R2, and M_start from the PBS tube. The pool parameters are free in the pool tubes only and start
+# at the result of step 1.
 #
-# The spread starts at 5 Hz and is bounded at 8 Hz. On this phantom the cost is almost flat in it:
-# about 3.5 Hz and 8 Hz fit equally well, and only the slowest tube's k and f move with it. Read the
-# fitted width as an effective one, not a measurement. 15 nodes keep the averaging itself accurate to a
-# small fraction of the noise up to 8 Hz; fewer are not (see bmc_jax.simulation.spread).
+# The spread starts at 5 Hz and is bounded at 8 Hz. On this phantom the cost hardly changes with
+# it: about 3.5 Hz and 8 Hz fit equally well, and only k and f of the slowest tube change with it.
+# The fitted width is therefore an effective width, not a measurement. With 15 nodes, the averaging
+# is accurate to a small fraction of the noise up to 8 Hz; fewer nodes are not
+# (see bmc_jax.simulation.spread).
 Kp, Fp, T2p = (replace(s, samples=pool) for s in (K, F, T2))
 R2F = FreeParam("r2w", "water_r2", None, scale=1.0, lo=0.5, hi=2.0, x0=1.0, scope="shared", mode="factor")
 MS = FreeParam("m_start", "m_start", None, scale=1.0, lo=0.2, hi=1.0, x0=M_START, scope="shared")
@@ -83,7 +96,7 @@ joint = fit_joint(ladder, spec, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spr
                   callback=lambda it, c: print(f"   step {it + 1:2d}  cost {c:.5g}", flush=True))
 
 # ---------------------------------------------------------------------------------------------
-# 3. What changed
+# 3. Comparison of the two fits
 # ---------------------------------------------------------------------------------------------
 print(f"\nshared: water R2 x{joint['r2w'][0]:.3f} +- {joint.sd[0, 3]:.3f}   "
       f"M_start {joint['m_start'][0]:.3f} +- {joint.sd[0, 4]:.3f}   "
@@ -102,7 +115,7 @@ for i, name in enumerate(names):
           f"{1e3 / plain['r2p'][j]:>6.1f}ms {1e3 / joint['r2p'][i]:>5.1f}ms "
           f"{plain.rms[j] / noise[i]:>15.1f} {joint.rms[i] / noise[i]:>7.1f}")
 
-print("\nRMS per rung, mean of the six pool tubes (held -> shared):")
+print("\nRMS per rung, mean of the six pool tubes (water held, then shared):")
 for b, a, c in zip(levels, plain.rms_per_block.mean(0), joint.rms_per_block[list(pool)].mean(0)):
     print(f"  {b:4.2f} uT   {a:.5f} -> {c:.5f}")
 
@@ -111,12 +124,12 @@ print_pairs(plain["f"], [names[i] for i in pool], "held")
 print_pairs(joint["f"], names, "shared")
 on_bound = [f"{names[i]} {s.name}" for i in range(len(names)) for l, s in enumerate(spec.slots)
             if joint.at_bounds[i, l] and joint.free[i, l]]
-print(f"steps: cost {joint.cost[0]:.4g} -> {joint.cost[-1]:.4g}; on a bound: {', '.join(on_bound) or 'nothing'}")
+print(f"cost from {joint.cost[0]:.4g} to {joint.cost[-1]:.4g}; on a bound: {', '.join(on_bound) or 'nothing'}")
 
-# A lower misfit is not by itself a better model: three more free values always fit a little
-# better. What counts is that the shared values come out physical (R2 near the PBS value, M_start
-# between 0 and 1, a spread of a few Hz), that PBS -- pure water, no pool to hide behind -- fits
-# better, and that the checks the fit never saw -- the pairs here, QUESP against QUEST in tutorial
-# 09 -- do not get worse.
+# A lower misfit alone does not show a better model: three additional free parameters always fit
+# somewhat better. What matters is that the shared values are physically plausible (R2 close to the
+# PBS value, M_start between 0 and 1, a spread of a few Hz), that the PBS tube, which contains only
+# water, fits better, and that the checks the fit did not use (the pair ratios here, and QUESP
+# against QUEST) do not get worse.
 
-print("\nNext: 11_per_rung.py -- a value per rung of the ladder, shared by the tubes.")
+print("\nNext: 11_per_rung.py, one parameter per rung of the ladder, shared by all tubes.")

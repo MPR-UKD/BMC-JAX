@@ -1,9 +1,23 @@
-"""05 -- Several saturation powers: the QUESP ladder.
+"""Tutorial 05: The QUESP ladder (several saturation amplitudes)
 
-Tutorial 04 showed that one saturation level measures k well only where the saturation
-efficiency alpha happens to be in a useful range, and badly at both ends. A ladder fixes that by
-giving the fit several values of alpha for the same pool -- no single rung has to be well
-conditioned, because the SHAPE across the rungs carries the information.
+QUESP (quantification of exchange as a function of saturation power) measures the same sample at
+several saturation amplitudes, the "rungs" of a ladder. Tutorial 04 showed that a single amplitude
+measures k well only where the saturation efficiency alpha lies in a useful range. Each amplitude
+gives a different alpha, and the change of the CEST effect from rung to rung separates the exchange
+rate from the pool size. No single rung has to be well conditioned on its own.
+
+This tutorial
+  1. stacks five experiments (B1 = 0.25 to 4 uT) with Experiment.stack(), so that one residual
+     spans the whole ladder;
+  2. compares the k fitted from one amplitude with the k fitted from the five-rung ladder, with the
+     same 0.2 % noise, at five exchange rates;
+  3. fits three samples at once and shows how to read the result: the summary table, the residual
+     per rung (rms_per_block) and the parameters on a bound (at_bounds).
+
+Note: the measured spectra must be concatenated in the same order as the stacked experiments. A
+wrong order raises no error; it only gives a wrong fit.
+
+Requirements: the core package only.
 
 Run:  python 05_fit_ladder.py
 """
@@ -26,10 +40,10 @@ NOISE = 0.002
 # ---------------------------------------------------------------------------------------------
 # Build the ladder
 # ---------------------------------------------------------------------------------------------
-# Experiment.stack joins the rungs along the offset axis, so ONE residual spans the whole ladder.
-# That is what makes k and f identifiable. The measured data must be concatenated in the SAME
-# order -- that is the caller's job and the easiest thing here to get wrong, because getting it
-# wrong does not raise, it just produces a fit.
+# Experiment.stack joins the rungs along the offset axis, so that one residual spans the whole
+# ladder. This joint residual is what makes k and f separable. The measured data must be
+# concatenated in the same order. This is the responsibility of the caller: a wrong order raises
+# no error, it only gives a wrong fit.
 
 one_rung = Experiment(jax_params, cw_saturation(ppm, b1_uT=1.0, tsat_s=2.0, b0_T=params.system.b0),
                    m0, params.mz_loc)
@@ -54,9 +68,9 @@ def measure(problem, k_true, seed=0):
 
 
 # ---------------------------------------------------------------------------------------------
-# Same noise, same starting values, one rung against five
+# One amplitude against five, with the same noise and the same start values
 # ---------------------------------------------------------------------------------------------
-print(f"\nwith {NOISE:.1%} noise, started 3x away from truth:")
+print(f"\nwith {NOISE:.1%} noise, start value of k three times the true value:")
 print(f"{'k true':>8} | {'one rung':>10} {'err':>6} | {'5-rung ladder':>14} {'err':>6}")
 print("-" * 56)
 for k_true in (50.0, 150.0, 500.0, 1500.0, 4000.0):
@@ -68,17 +82,18 @@ for k_true in (50.0, 150.0, 500.0, 1500.0, 4000.0):
     print(f"{k_true:>8.0f} | {row[0]:>10.0f} {row[1]:>5.0%} | {row[2]:>14.0f} {row[3]:>5.0%}")
 
 print("""
-  -> every rung improves, most dramatically where one level was worst. But note k = 50: still
-     the hardest case at ~30 %, because it is slow enough that even the 0.25 uT rung saturates
-     it substantially. A ladder widens the range of k you can measure; it does not make the
-     range unlimited, and the bottom rung sets the slow end.""")
+  The ladder strongly reduces the error of k where a single amplitude was poor. Where a single
+  amplitude is already well conditioned (k = 500), both give a similar error. The slowest pool
+  (k = 50) remains the most difficult case, because even the lowest amplitude (0.25 uT) saturates
+  it substantially. A ladder extends the range of exchange rates that can be measured, and its
+  lowest amplitude sets the lower end of that range.""")
 
 # ---------------------------------------------------------------------------------------------
-# What the result tells you
+# Reading the result
 # ---------------------------------------------------------------------------------------------
-# n_per_block lets FitResult report the residual per rung. That matters: a model error that
-# grows with saturation power is invisible in the pooled RMS and obvious per rung, because the
-# pooled number averages it away with the rungs that fit well.
+# n_per_block lets FitResult report the residual per rung. A model error that grows with the
+# saturation amplitude is hidden in the overall RMS, which averages it with the rungs that fit
+# well, but it is clearly visible in the RMS per rung.
 
 k_true = np.array([80.0, 400.0, 2000.0])
 Z = np.concatenate([measure(ladder, k, seed=i) for i, k in enumerate(k_true)])
@@ -95,8 +110,8 @@ for i, per in enumerate(res.rms_per_block):
     print(f"  sample {i}  " + "  ".join(f"{v:.2e}" for v in per))
 
 print("""
-res.at_bounds is worth checking every time. A parameter sitting on its bound is not a
-measurement -- the optimiser wanted to leave the allowed range and was stopped -- and the value
-reported is the bound, not the data's answer. summary() marks those rows with a star.
+Check res.at_bounds after every fit. A parameter on its bound is not a measurement: the optimiser
+tried to leave the allowed range and was stopped, so the reported value is the bound and not the
+value the data indicate. summary() marks these values with a star.
 
-Next: 06_quest.py -- the other ladder, in saturation TIME rather than power.""")
+Next: 06_quest.py, the QUEST ladder, which varies the saturation time instead of the amplitude.""")

@@ -1,11 +1,24 @@
-"""06 -- The other ladder: varying saturation TIME instead of power (QUEST).
+"""Tutorial 06: The QUEST ladder (several saturation times)
 
-QUESP sweeps how hard you saturate. QUEST sweeps how long. They reach the exchange rate through
-different physics -- QUESP through the saturation efficiency, QUEST through how fast the label
-builds up in water -- so agreement between them is a real check and not a repeat measurement.
+QUEST (quantification of exchange as a function of saturation time) measures the same sample with
+several saturation times at one amplitude. QUESP and QUEST determine the exchange rate through
+different mechanisms: QUESP through the saturation efficiency, QUEST through the build-up of the
+saturation in water over time. Agreement between the two is therefore a meaningful cross-check
+and not a repeated measurement. In practice, QUEST also uses one moderate amplitude, which avoids
+the power limits that restrict the high amplitudes of a QUESP ladder.
 
-QUEST also matters practically: it runs at one fixed, modest B1, so it does not hit the power
-limits that stop a QUESP ladder from reaching the high amplitudes a fast pool needs.
+This tutorial
+  1. builds a QUEST ladder (Tsat = 0.2 to 4 s at 1 uT). A longer saturation has more events, so the
+     rungs differ in length. Experiment.stack() pads the shorter rungs so that all rungs have the
+     same shape and run in one compiled loop;
+  2. fits k and f with QUESP and with QUEST at three exchange rates and compares the two results.
+
+How the padding works: the added events have zero duration and are placed before the sequence.
+Placed after the readout, they would make the simulator return the start magnetisation instead of
+the measured one. With a nonzero duration, they would add free relaxation to the shortest rungs,
+which carry most of the information on the exchange rate.
+
+Requirements: the core package only.
 
 Run:  python 06_quest.py
 """
@@ -27,21 +40,22 @@ TSAT = (0.2, 0.5, 1.0, 2.0, 4.0)
 NOISE = 0.002
 
 # ---------------------------------------------------------------------------------------------
-# The ragged-sequence problem, and how stacking solves it
+# Rungs of different length, and how stacking handles them
 # ---------------------------------------------------------------------------------------------
-# A QUESP ladder's rungs all have the same number of events -- only the amplitude changes. A
-# QUEST ladder's do not: a longer saturation is more pulses. Stacking pads the short ones so
-# every rung has the same shape, which is what lets one compiled loop run them all.
+# The rungs of a QUESP ladder all have the same number of events: only the amplitude changes. The
+# rungs of a QUEST ladder do not, because a longer saturation contains more pulses. Stacking pads
+# the shorter rungs so that every rung has the same shape, which lets one compiled loop run them
+# all.
 #
-# The padding is zero-duration no-ops placed BEFORE the sequence. Not after: the simulator
-# returns the last magnetisation it saw, and an ADC resets the running state, so a no-op after
-# the readout would return the STARTING magnetisation -- a smooth, flat, entirely wrong
-# spectrum. Not with a duration either: that is free relaxation, and it would add recovery time
-# to exactly the shortest rung, the one carrying the rate information.
+# The padding consists of zero-duration events placed before the sequence. Not after it: the
+# simulator returns the last magnetisation it recorded, and an ADC event resets the running state,
+# so an event after the readout would return the start magnetisation, a flat and wrong spectrum.
+# Not with a duration either: that would be free relaxation, added to the shortest rung, which
+# carries the most information on the exchange rate.
 
 rungs = [Experiment(jax_params, cw_saturation(ppm, b1_uT=1.0, tsat_s=t, b0_T=params.system.b0),
                  m0, params.mz_loc) for t in TSAT]
-# make them genuinely ragged, as a pulsed train would be
+# give the rungs different lengths, as in a pulsed saturation train
 rungs = [Experiment(r.params, pad_events(r.events, r.n_events + 2 * i), r.m0, r.mz_loc)
          for i, r in enumerate(rungs)]
 print(f"events per rung before stacking: {[r.n_events for r in rungs]}")
@@ -68,7 +82,7 @@ def measure(problem, k_true, seed=0):
 
 
 # ---------------------------------------------------------------------------------------------
-# Two independent routes to the same number
+# QUESP against QUEST
 # ---------------------------------------------------------------------------------------------
 print(f"Tsat ladder {TSAT} s at 1.0 uT, against a B1 ladder at 2.0 s:")
 print(f"{'k true':>8} | {'QUESP':>8} {'err':>6} | {'QUEST':>8} {'err':>6} | {'they agree to':>14}")
@@ -84,12 +98,12 @@ for k_true in (150.0, 500.0, 1500.0):
           f"| {agree:>13.0%}")
 
 print("""
-Agreement between the two is the useful result. They share the model but not the mechanism, so
-if the model is wrong in a way that matters they drift apart -- and if they agree, the number is
-a property of the sample rather than of one experiment.
+The agreement between the two experiments is the main result. Both use the same model but a
+different mechanism, so a relevant error of the model makes them disagree. When they agree, the
+exchange rate is a property of the sample and not of one experiment.
 
-They are not fully independent: both use the same pool T2, the same relaxation times and the
-same B0/B1 calibration. A disagreement points at the model; an agreement does not prove those
-fixed inputs are right.
+The two are not fully independent: both use the same pool T2, the same relaxation times and the
+same B0 and B1 calibration. A disagreement points to the model; an agreement does not prove that
+these fixed inputs are correct.
 
-Next: 07_many_voxels.py -- the same fit over an image instead of one spectrum.""")
+Next: 07_many_voxels.py, the same fit applied to many voxels at once.""")

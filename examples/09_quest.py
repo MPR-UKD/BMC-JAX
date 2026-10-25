@@ -1,13 +1,23 @@
-"""09 -- QUEST on the same phantom: six tubes, six saturation times.
+"""Tutorial 09: QUEST fit of the same phantom
 
-QUESP sweeps how HARD you saturate; QUEST sweeps how LONG. They reach the exchange rate through
-different physics -- QUESP through the saturation efficiency, QUEST through how fast the label
-builds up in water -- so the two are a genuine cross-check and not a repeat measurement. These
-are the same tubes as tutorial 08, scanned in the same session.
+The seven tubes of tutorial 08 were measured in the same session with QUEST: six saturation times
+from 0.4 to 5 s (2 to 25 pulses) at an amplitude of 1.0 uT. QUESP and QUEST determine the exchange
+rate through different mechanisms (tutorial 06), so comparing them is a meaningful cross-check.
+This tutorial fits the same three parameters per tube with the same fixed inputs and the same
+bounds as tutorial 08. Only the experiment differs, so the two results can be compared directly.
 
-QUEST also brings a mechanical problem QUESP does not have: the rungs are not the same length.
-A longer saturation is more pulses, so the sequences have different event counts and cannot be
-batched as they are.
+This tutorial
+  1. loads the six QUEST rungs. A longer saturation contains more pulses, so the rungs have
+     different numbers of events, and Experiment.stack() pads them to the same length;
+  2. fits k, f and the pool T2 of every tube;
+  3. prints the result and the pair checks.
+
+Comparison with tutorial 08: where QUESP and QUEST agree, the result is supported by two different
+mechanisms. Where they disagree, at least one experiment does not determine the parameter. For slow
+exchange, a single amplitude (QUEST) determines mainly the product k*f, not k and f separately, so
+the slow tubes are expected to differ.
+
+Requirements: the core package; the data ship in examples/data/.
 
 Run:  python 09_quest.py
 """
@@ -29,14 +39,14 @@ ppm, tsat, names = data["ppm"], data["tsat_s"], [str(n) for n in data["vial_name
 keep = np.abs(ppm) >= EXCLUDE_PPM
 
 # ---------------------------------------------------------------------------------------------
-# 1. The sequences, and the ragged-rung problem
+# 1. The sequences, and rungs of different length
 # ---------------------------------------------------------------------------------------------
-# Experiment.stack pads every rung to the longest with leading no-ops, so one compiled loop runs
-# them all. The padding goes BEFORE the sequence, never after: the simulator returns the last
-# magnetisation it saw and an ADC resets the running state, so a no-op after the readout would
-# return the STARTING magnetisation -- a smooth, flat, entirely wrong spectrum. The no-ops carry
-# no duration either, since that would be free relaxation added to precisely the shortest rung,
-# the one carrying the rate information.
+# Experiment.stack pads every rung to the length of the longest with zero-duration events placed
+# before the sequence, so that one compiled loop runs all rungs. The padding is never placed after
+# the readout: the simulator returns the last magnetisation it recorded and an ADC event resets the
+# running state, so an event after the readout would return the start magnetisation. The padding
+# has no duration either, because that would add free relaxation to the shortest rung, which
+# carries the most information on the exchange rate.
 
 print(f"Ladder: Tsat = {', '.join(f'{t:g}' for t in tsat)} s (at 1.0 uT)")
 
@@ -47,7 +57,7 @@ print("  events per rung: " + ", ".join(f"{r.n_events}" for r in rungs))
 
 ladder = Experiment.stack(rungs)
 Z = data["Z_quest"][:, :, keep].reshape(len(names), -1)
-print(f"  padded to {ladder.n_events} each -> {ladder.n_offsets} offsets")
+print(f"  padded to {ladder.n_events} each, {ladder.n_offsets} offsets in total")
 print(f"Model: {ladder.n_offsets} offsets    Data: {Z.shape[0]} tubes x {Z.shape[1]} points")
 
 # ---------------------------------------------------------------------------------------------
@@ -76,8 +86,10 @@ print()
 print_pairs(res["f"], names)
 
 print("""
-Run 08_quesp.py and compare. Where the two ladders agree on a tube, the number rests on two
-different pieces of physics and is worth believing. Where they disagree, at least one of them
-is reporting something other than the exchange rate -- and the fit will not tell you that on
-its own, which is the reason to measure both. Expect the slow tubes to disagree: at a single
-saturation power QUEST fixes mainly the product k*f of a slow pool, not k and f apart.""")
+Compare with the output of 08_quesp.py. Where the two ladders agree on a tube, the result is
+supported by two different mechanisms. Where they disagree, at least one of them does not measure
+the exchange rate. A single fit cannot show this on its own, which is the reason to measure both.
+The slow tubes are expected to differ: at a single saturation amplitude, QUEST determines mainly
+the product k*f of a slow pool, not k and f separately.
+
+Next: 10_shared_water.py, a joint fit with the water parameters shared by all tubes.""")

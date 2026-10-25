@@ -1,30 +1,41 @@
-"""11 -- One value per rung of the ladder, shared by the tubes.
+"""Tutorial 11: One parameter per saturation amplitude, shared by all tubes
 
-Some errors belong to a rung, not to a tube. The scanner plays each rung of the QUESP ladder at its
-own RF power; if the amplifier is not perfectly linear, the B1 a rung delivers can differ from the
-nominal by a few percent -- the same for every tube, and invisible to a B1 map measured at one power.
-A slow field drift does the same to B0: one offset per rung, shared by the tubes.
+Some errors belong to a rung of the ladder, not to a tube. The scanner plays each QUESP amplitude
+at its own RF power. If the RF amplifier is not perfectly linear, the B1 delivered at one amplitude
+can differ from the nominal value by a few percent. This deviation is the same in every tube, and
+a B1 map measured at a single power does not show it. A slow B0 drift during the measurement has
+a similar effect: one frequency offset per rung, the same in every tube.
 
-`FreeParam(scope="block")` is one value per experiment of a stacked ladder, shared by the samples:
+FreeParam(scope="block") fits one value per experiment of a stacked ladder, shared by all samples:
 
-  B1 per rung   field "rel_b1", mode "factor": the measured relative B1 of every tube times the rung's factor
-  (B0 per rung  field "b0_inhom", mode "add" would be the drift; not fitted here, the data are B0-corrected)
+  B1 per rung   field "rel_b1", mode="factor": the measured relative B1 of every tube is multiplied
+                by the factor of the rung
+  B0 per rung   field "b0_inhom", mode="add" would describe a drift. It is not fitted here, because
+                the data are already B0-corrected.
 
-This runs tutorial 10's model (k, f and pool T2 per pool tube; water R2 factor, M_start and B0 spread
-shared by all seven tubes), then the same with a B1 factor per rung, and compares them rung by rung.
-`block_jacobian="split"` builds the eight B1 columns from ONE forward tangent instead of eight (the same
-derivative; see fit_joint's notes).
+This tutorial
+  1. runs the fit of tutorial 08 to obtain start values;
+  2. runs the joint fit of tutorial 10 (k, f and pool T2 per pool tube; water R2 factor, M_start
+     and B0 spread shared by all seven tubes);
+  3. runs the same joint fit with one additional B1 factor per rung, and compares the two fits rung
+     by rung. block_jacobian="split" builds the eight B1 columns of the Jacobian from one
+     forward-mode pass instead of eight; the derivative is the same.
 
-What to look for:
-  * factors near 1 with no pattern: the amplifier is linear and the per-rung B1 explains nothing;
-  * a smooth trend with power: an amplifier effect, worth a B1 map at a second power;
-  * the mean of the factors trades against the water R2 factor (both deepen the water saturation), so
-    read them together;
-  * the PBS tube: pure water, no pool. A real B1 error changes its saturation too, so a real per-rung B1
-    must fit PBS better at the rungs it changes. If only the pool tubes improve, the factors are soaking
-    up a pool-model error, not measuring B1.
+How to read the result
+  * Factors close to 1 without a trend: the amplifier is linear, and a B1 factor per rung explains
+    nothing.
+  * A smooth trend with the amplitude: a possible amplifier effect. A B1 map measured at a second
+    power would test it.
+  * The mean of the factors trades off against the water R2 factor, because both deepen the direct
+    water saturation. Read the two together.
+  * The PBS tube contains only water. A real B1 error changes its saturation as well, so a real
+    per-rung B1 effect must also improve the PBS fit at the affected rungs. If only the tubes with a
+    CEST pool improve, the factors compensate an error of the pool model and do not measure B1.
 
-Run:  python 11_per_rung.py          (about 3 h on one RTX 3070: two joint fits with 15 nodes)
+Requirements: the core package; the data ship in examples/data/. Runtime: about 3 h on one
+RTX 3070 (two joint fits with 15 nodes).
+
+Run:  python 11_per_rung.py
 """
 import sys
 from dataclasses import replace
@@ -66,11 +77,11 @@ B1R = FreeParam("b1", "rel_b1", None, scale=1.0, lo=0.7, hi=1.3, x0=1.0, scope="
 spread = B0Spread(nodes=15)
 progress = lambda it, c: print(f"   step {it + 1:2d}  cost {c:.5g}", flush=True)
 
-print("1. k, f and pool T2 per tube (tutorial 08), for the starts ...")
+print("1. k, f and pool T2 per tube (tutorial 08), for the start values ...")
 ladder6, Z6 = quesp(load_data(tubes=pool))
 plain = fit(ladder6, FitSpec([K, F, T2]), Z6, n_iter=60, n_per_block=n_per)
 
-print("2. tutorial 10: + water R2 factor, M_start and B0 spread, shared by the seven tubes ...")
+print("2. tutorial 10: water R2 factor, M_start and B0 spread shared by the seven tubes ...")
 Kp, Fp, T2p = (replace(s, samples=pool) for s in (K, F, T2))
 spec10 = FitSpec([Kp, Fp, T2p, R2F, MS, SIG])
 x0 = np.tile([s.x0 for s in spec10.slots], (len(names), 1))
@@ -78,14 +89,14 @@ x0[list(pool), :3] = plain.x
 ladder, Z = quesp(data)
 water = fit_joint(ladder, spec10, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spread=spread, callback=progress)
 
-print("3. the same + one B1 factor per rung, shared by the tubes ...")
+print("3. the same with one B1 factor per rung, shared by the tubes ...")
 x1 = np.column_stack([water.x, np.ones(len(names))])          # from step 2; the B1 factors start at 1
 rung = fit_joint(ladder, FitSpec([Kp, Fp, T2p, R2F, MS, SIG, B1R]), Z, n_iter=12, n_per_block=n_per,
                  x0_phys=x1, spread=spread, block_jacobian="split", callback=progress)
 
 b1 = rung.blocks["b1"]
 pbs = [i for i in range(len(names)) if i not in pool]
-print(f"\n{'rung':>8} {'B1 factor':>14} {'RMS pool tubes (10 -> +B1)':>28} {'RMS PBS (10 -> +B1)':>22}")
+print(f"\n{'rung':>8} {'B1 factor':>14} {'RMS pool tubes (10, +B1)':>28} {'RMS PBS (10, +B1)':>22}")
 for j, b in enumerate(levels):
     flag = "  at bound" if b1["at_bounds"][j] else ""
     print(f"{b:6.2f} uT {b1['x'][j]:8.3f} +- {b1['sd'][j]:.3f} "
@@ -101,7 +112,7 @@ print_pairs(rung["f"], names, "+ B1 per rung")
 for i in pool:
     print(f"  {names[i]:<18} k {water['k'][i]:7.1f} -> {rung['k'][i]:7.1f}   f {water['f'][i]:.5f} -> {rung['f'][i]:.5f}")
 
-# Eight more free values always lower the misfit somewhat. The per-rung B1 is worth keeping only if the
-# drop sits where B1 matters (the strong rungs), PBS improves with the pool tubes, the factors are physical
-# (no bound, a few percent from 1, smooth with power) and the checks the fit never saw -- the pairs, QUESP
-# against QUEST -- hold.
+# Eight additional free parameters always lower the misfit somewhat. A B1 factor per rung is worth
+# keeping only if the misfit drops where B1 matters (the high amplitudes), the PBS tube improves together
+# with the pool tubes, the factors are physically plausible (not on a bound, a few percent from 1, smooth
+# with the amplitude), and the checks the fit did not use (the pair ratios, QUESP against QUEST) still hold.

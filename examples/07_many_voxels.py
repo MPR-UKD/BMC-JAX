@@ -1,8 +1,22 @@
-"""07 -- Fitting an image: many voxels at once, with per-voxel calibration.
+"""Tutorial 07: Fitting many voxels at once
 
-Everything so far fitted one or three spectra. A slice is thousands, each with its own measured
-T1, T2, B0 offset and B1 scaling. Those are FIXED per voxel -- they were measured, not fitted --
-while k and f are free. This is what the batching exists for.
+The previous tutorials fitted one to three spectra. An image slice contains thousands of
+Z-spectra, and every voxel has its own measured water T1, B0 offset and relative B1. These
+calibration values are measured separately and held fixed in the fit, while k and f are fitted
+in every voxel. BMC-JAX fits all voxels in one batched call.
+
+This tutorial
+  1. simulates a small slice of 16 x 16 voxels with a three-rung QUESP ladder (0.5, 1 and 2 uT),
+     with k varying from 80 to 900 1/s across the slice, realistic variations of B0, B1 and T1,
+     and 0.3 % noise;
+  2. fits k and f in every voxel, with the per-voxel calibration held fixed (tile_params gives
+     every voxel its own copy of the parameters);
+  3. repeats the fit with the nominal B0, B1 and T1 in every voxel, to show the error caused by
+     ignoring the calibration maps;
+  4. repeats the fit in chunks of 32 voxels (max_chunk), which limits GPU memory, and shows that
+     float32 results then differ by up to about one percent.
+
+Requirements: the core package only.
 
 Run:  python 07_many_voxels.py
 """
@@ -26,10 +40,10 @@ N = 16 * 16                                   # a small "slice"
 NOISE = 0.003
 
 # ---------------------------------------------------------------------------------------------
-# A phantom slice with spatially varying truth AND varying calibration
+# 1. A simulated slice with varying k and varying calibration
 # ---------------------------------------------------------------------------------------------
-# tile_params gives every voxel its own copy of the parameters, which you then overwrite per
-# voxel. Anything you do not overwrite stays shared.
+# tile_params gives every voxel its own copy of the parameters, which are then overwritten per
+# voxel. Everything that is not overwritten stays the same in all voxels.
 
 rng = np.random.default_rng(0)
 k_true = np.linspace(80.0, 900.0, N).astype(np.float32)
@@ -58,12 +72,11 @@ Z = Z + rng.normal(0, NOISE, Z.shape)
 print(f"slice: {N} voxels x {Z.shape[1]} offsets ({len(ladder_b1)} B1 rungs x {len(ppm)})")
 
 # ---------------------------------------------------------------------------------------------
-# Fit, giving the fitter the calibration it should NOT be guessing
+# 2. Fit with the per-voxel calibration held fixed
 # ---------------------------------------------------------------------------------------------
-# The key point: b0_inhom, rel_b1 and water_r1 are per-voxel and stay FIXED at their measured
-# values. Leaving them at a single slice-average instead is a common and expensive mistake --
-# a 6 % B1 error is roughly doubled in the fitted k, because saturation efficiency goes as the
-# square of the amplitude.
+# b0_inhom, rel_b1 and water_r1 are set per voxel and held at their measured values. Using one
+# average value for the whole slice instead is a common error: a 6 % error in B1 becomes a larger
+# error in the fitted k, because the saturation efficiency depends on the square of the amplitude.
 
 fit_base = tile_params(jax_params, N)._replace(
     b0_inhom=jnp.asarray(b0_true), rel_b1=jnp.asarray(b1_true),
@@ -83,7 +96,7 @@ print(f"  f    median error {np.median(np.abs(res['f'] / params.cest_pools[0].f 
 print(f"  at bounds: {int(res.at_bounds.sum())} of {res.at_bounds.size} values")
 
 # ---------------------------------------------------------------------------------------------
-# What happens if you ignore the calibration
+# 3. The same fit with the calibration ignored
 # ---------------------------------------------------------------------------------------------
 wrong = Experiment(tile_params(jax_params, N), events, m0, params.mz_loc)
 res_wrong = fit(wrong, spec, Z, n_iter=40)
@@ -93,32 +106,33 @@ print(f"  k    median error {np.median(err_wrong):.1%}   "
       f"{np.median(err_wrong) / np.median(err):.1f}x worse")
 
 # ---------------------------------------------------------------------------------------------
-# Memory, and a float32 surprise worth knowing about
+# 4. Memory use, and the reproducibility of float32 fits
 # ---------------------------------------------------------------------------------------------
-# vmap over every voxel allocates for every voxel at once, which a real slice will not fit on a
-# card. max_chunk bounds peak memory independently of how many voxels there are.
+# A batch over every voxel allocates memory for every voxel at once, which does not fit on a GPU
+# for a real slice. max_chunk limits the peak memory, whatever the number of voxels.
 #
-# Mathematically the result should not depend on it: the voxels are independent, and chunking
-# is the same computation in pieces. In float32 it does, by around a percent.
+# Mathematically, the result does not depend on the chunk size: the voxels are independent, and
+# chunking only splits the same computation into pieces. In float32 the results differ slightly.
 
 res_chunked = fit(problem, spec, Z, n_iter=40, max_chunk=32)
 d = np.abs(res_chunked["k"] - res["k"])
 print(f"\nmax_chunk=32 vs one shot: max |dk| = {d.max():.2f} Hz "
       f"({(d / res['k']).max():.1%} relative)")
 print("""
-  That is not a bug, and it is not the chunking being wrong. Changing the batch size changes the
-  kernel XLA compiles, float32 reductions are not associative, and the k/f problem is close
-  enough to singular that a ~1e-7 difference in the Jacobian moves the optimiser's path by ~1 %
-  in k. The same comparison in float64 agrees to 2e-7 relative.
+  This is not an error of the chunking. A different batch size makes XLA compile a different
+  kernel, float32 sums depend on the order of the terms, and the k/f problem is close enough to
+  singular that a difference of about 1e-7 in the Jacobian changes the path of the optimiser and
+  moves k by up to about 1 %. The same comparison in float64 agrees to 2e-7 relative.
 
-  What to take from it: float32 fitting of k and f is reproducible to about a percent on this
-  kind of problem, and that is a floor set by conditioning, not by the data. If a conclusion
-  depends on a difference smaller than that, refit with bmc_jax.settings.use_x64(True)
-  and check it survives.""")
+  Consequence: float32 fits of k and f are reproducible to about one percent for this kind of
+  problem. This limit is set by the conditioning of the problem, not by the data. If a conclusion
+  depends on a smaller difference, refit with bmc_jax.settings.use_x64(True) and check that it
+  still holds.""")
 
 print("""
-For several GPUs there is fit_batch_sharded, which splits the same batch across every
-local device.
+For several GPUs, fit_batch_sharded splits the same batch across all local devices.
 
-That is the tour: pools (01), simulate (02), a real .seq (03), one-level fitting and its
-failure mode (04), the QUESP ladder (05), QUEST (06), and a slice (07).""")
+Summary of tutorials 01 to 07: defining a model (01), simulating a spectrum (02), simulating a
+Pulseq file (03), fitting from one saturation level and its limits (04), the QUESP ladder (05),
+the QUEST ladder (06) and fitting many voxels (07). Tutorials 08 to 11 apply these steps to a
+measured phantom.""")
