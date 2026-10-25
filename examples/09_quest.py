@@ -30,7 +30,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _phantom import (EXCLUDE_PPM, POOL_T2_START, load_data, load_events, print_pairs, quest_stem,
                       start_magnetisation, vial_params)
 
+import bmc_jax
 from bmc_jax.fitting import Experiment, FitSpec, FreeParam, fit
+
+# The plain matrix exponential (docs/guide.md, "Matrix exponential"). With the library version, the batched
+# Jacobian of these long scanner sequences came back NaN on an RTX 3070, every step of the fit was rejected,
+# and the fit ended at its start values without an error. The paper's fits used the plain version too.
+bmc_jax.settings.use_expm("plain")
 
 print(__doc__)
 

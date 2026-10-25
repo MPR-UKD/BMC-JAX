@@ -39,8 +39,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _phantom import (EXCLUDE_PPM, M_START, POOL_T2_START, load_data, load_events, print_pairs, quesp_stem,
                       start_magnetisation, vial_params)
 
+import bmc_jax
 from bmc_jax.fitting import Experiment, FitSpec, FreeParam, fit, fit_joint
 from bmc_jax.simulation import B0Spread
+
+# The plain matrix exponential (docs/guide.md, "Matrix exponential"). With the library version, the batched
+# Jacobian of these long scanner sequences came back NaN on an RTX 3070, every step of the fit was rejected,
+# and the fit ended at its start values without an error. The paper's fits used the plain version too.
+bmc_jax.settings.use_expm("plain")
 
 print(__doc__)
 
@@ -92,7 +98,7 @@ x0 = np.tile([s.x0 for s in spec.slots], (len(names), 1))
 x0[list(pool), :3] = plain.x                                       # k, f, pool R2 from step 1
 ladder, Z = quesp(data)
 print("2. + water R2 factor, M_start and B0 spread, shared by the seven tubes ...")
-joint = fit_joint(ladder, spec, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spread=spread,
+joint = fit_joint(ladder, spec, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spread=spread, max_chunk=3,
                   callback=lambda it, c: print(f"   step {it + 1:2d}  cost {c:.5g}", flush=True))
 
 # ---------------------------------------------------------------------------------------------

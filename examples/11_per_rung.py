@@ -47,8 +47,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _phantom import (EXCLUDE_PPM, M_START, POOL_T2_START, load_data, load_events, print_pairs, quesp_stem,
                       start_magnetisation, vial_params)
 
+import bmc_jax
 from bmc_jax.fitting import Experiment, FitSpec, FreeParam, fit, fit_joint
 from bmc_jax.simulation import B0Spread
+
+# The plain matrix exponential (docs/guide.md, "Matrix exponential"). With the library version, the batched
+# Jacobian of these long scanner sequences came back NaN on an RTX 3070, every step of the fit was rejected,
+# and the fit ended at its start values without an error. The paper's fits used the plain version too.
+bmc_jax.settings.use_expm("plain")
 
 print(__doc__)
 
@@ -87,12 +93,12 @@ spec10 = FitSpec([Kp, Fp, T2p, R2F, MS, SIG])
 x0 = np.tile([s.x0 for s in spec10.slots], (len(names), 1))
 x0[list(pool), :3] = plain.x
 ladder, Z = quesp(data)
-water = fit_joint(ladder, spec10, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spread=spread, callback=progress)
+water = fit_joint(ladder, spec10, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spread=spread, max_chunk=3, callback=progress)
 
 print("3. the same with one B1 factor per rung, shared by the tubes ...")
 x1 = np.column_stack([water.x, np.ones(len(names))])          # from step 2; the B1 factors start at 1
 rung = fit_joint(ladder, FitSpec([Kp, Fp, T2p, R2F, MS, SIG, B1R]), Z, n_iter=12, n_per_block=n_per,
-                 x0_phys=x1, spread=spread, block_jacobian="split", callback=progress)
+                 x0_phys=x1, spread=spread, max_chunk=3, block_jacobian="split", callback=progress)
 
 b1 = rung.blocks["b1"]
 pbs = [i for i in range(len(names)) if i not in pool]
