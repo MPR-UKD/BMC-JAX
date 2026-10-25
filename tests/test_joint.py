@@ -46,6 +46,11 @@ F = FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-5, hi=0.01, x0=0.0005)
 R2W = FreeParam("r2w", "water_r2", None, scale=10.0, lo=1.0, hi=100.0, x0=14.0, scope="shared")
 F_NOE = FreeParam("f_noe", "cest_f", 1, scale=0.001, lo=0.0, hi=0.03, x0=0.002, samples=(0, 1))
 
+# How close a recovered k must be. The slowest sample (k 40, saturation efficiency close to 1) is the worst
+# conditioned: in float32 its fit stops 1 to 3 % from the truth, depending on the CPU's instruction set
+# (3.2 % with SSE4.2, failing a 3 % limit on some CI machines). A broken fit is off by far more.
+K_RTOL = 5e-2
+
 
 @pytest.fixture(scope="module")
 def amide():
@@ -90,7 +95,7 @@ def test_a_shared_value_is_recovered(amide):
     res = fit_joint(Experiment(start, events, m0, p.mz_loc), FitSpec([K, F, R2W]), z, n_iter=30)
     assert np.all(res["r2w"] == res["r2w"][0]), "a shared value is ONE value"
     assert res["r2w"][0] == pytest.approx(20.0, rel=5e-3)
-    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=K_RTOL)
     assert np.all(res.sd[:, 2] == res.sd[0, 2]) and np.isfinite(res.sd).all()
     assert res.cost[-1] < res.cost[0] and res.nan_steps == 0
 
@@ -215,7 +220,7 @@ def test_a_shared_factor_and_start_state_are_recovered(amide):
                     n_iter=40)
     assert res["r2f"][0] == pytest.approx(0.8, rel=5e-3)
     assert res["m0"][0] == pytest.approx(0.6, rel=5e-3)
-    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=K_RTOL)
 
 
 def test_a_start_state_free_in_some_samples_only(amide):
@@ -230,7 +235,7 @@ def test_a_start_state_free_in_some_samples_only(amide):
     res = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F, m_each]), z2, n_iter=40)
     np.testing.assert_allclose(res["m0"][:2], [0.7, 0.5], rtol=5e-3)
     assert res["m0"][2] == pytest.approx(1.0) and not res.free[2, 2]
-    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=K_RTOL)
 
 
 def test_one_offset_per_experiment_is_recovered(amide):
@@ -250,7 +255,7 @@ def test_one_offset_per_experiment_is_recovered(amide):
                     n_iter=40, n_per_block=n_per)
     np.testing.assert_allclose(res["db0"], drift, atol=2e-3)
     assert np.isnan(res.x[:, 2]).all() and res.blocks["db0"]["sd"].shape == (4,)
-    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=K_RTOL)
 
 
 @pytest.mark.parametrize("extra", [R2_FACTOR, M_SHARED, DB0], ids=["factor", "m_start", "block"])
@@ -323,7 +328,7 @@ def test_a_shared_spread_is_recovered(amide):
     z2 = jnp.stack([simulate_spectrum_spread(_one(true, i), events, m0[i], 25.0, sp)[:, p.mz_loc] for i in range(3)])
     res = fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F, SIGMA]), z2, n_iter=30, spread=sp)
     assert res["sig"][0] == pytest.approx(25.0, rel=2e-2)
-    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=3e-2)
+    np.testing.assert_allclose(res["k"], [40.0, 120.0, 300.0], rtol=K_RTOL)
 
 
 def test_b0_spread_needs_fit_joint_and_a_spread(amide):
