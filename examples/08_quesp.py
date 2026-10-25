@@ -22,8 +22,8 @@ number of labile protons and the molar mass. The ratio within a pair does not: t
 give an f ratio of 2, and the creatine and carnosine pairs, each one solution at two pH values, a
 ratio of 1.
 
-Requirements: the core package; the data ship in examples/data/. Most of the runtime is the
-compilation of the long scanner sequences.
+Requirements: the core package; the data ship in examples/data/. Runtime: about 15 minutes on one
+RTX 3070.
 
 Run:  python 08_quesp.py
 """

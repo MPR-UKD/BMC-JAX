@@ -6,8 +6,6 @@ New:
 - `fit_joint(stop_lam=, active_bounds=, keep_jacobian=)`: a stopping rule on the damping, parameters
   held at an active bound, and reuse of the Jacobian after a rejected step, for coupled fits. Off by
   default; the default path is unchanged.
-- Tutorial 12 (`examples/12_paper_phantom.py`): the phantom fits of the paper, printed next to the
-  published values.
 - Automatic tests on every push and once a week (GitHub Actions).
 
 Fixed:
@@ -15,6 +13,8 @@ Fixed:
   and a clean install without it failed.
 - `bmc_jax.sequences.pulseq` no longer needs pypulseq to be imported; pypulseq is only needed to read
   or write a `.seq` file.
+- Tutorials 08 to 11 use the plain matrix exponential. With the library version the batched Jacobian
+  came back NaN on an RTX 3070, every step was rejected, and the fits ended at their start values.
 
 Changed:
 - The tutorials, the tutorial overview and the user guide were rewritten in a neutral, explanatory

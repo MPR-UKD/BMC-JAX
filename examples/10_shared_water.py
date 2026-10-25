@@ -24,7 +24,7 @@ This tutorial
   2. runs the joint fit, 12 Levenberg-Marquardt steps, with the shared water parameters free;
   3. compares the two fits tube by tube, the residual per amplitude, and the pair checks.
 
-Requirements: the core package; the data ship in examples/data/. Runtime: about 1.5 h on one
+Requirements: the core package; the data ship in examples/data/. Runtime: about 2 h on one
 RTX 3070, because the B0 spread costs 15 simulations per tube and step.
 
 Run:  python 10_shared_water.py
@@ -97,7 +97,7 @@ spec = FitSpec([Kp, Fp, T2p, R2F, MS, SIG])
 x0 = np.tile([s.x0 for s in spec.slots], (len(names), 1))
 x0[list(pool), :3] = plain.x                                       # k, f, pool R2 from step 1
 ladder, Z = quesp(data)
-print("2. + water R2 factor, M_start and B0 spread, shared by the seven tubes ...")
+print("2. the same fit, with water R2 factor, M_start and B0 spread shared by the seven tubes ...")
 joint = fit_joint(ladder, spec, Z, n_iter=12, n_per_block=n_per, x0_phys=x0, spread=spread, max_chunk=3,
                   callback=lambda it, c: print(f"   step {it + 1:2d}  cost {c:.5g}", flush=True))
 

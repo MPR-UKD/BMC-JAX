@@ -122,8 +122,8 @@ GPUs, and remains differentiable at every level.
 
 ## Tutorials
 
-[`examples/`](examples/) contains twelve tutorials. Tutorials 01 to 07 build everything in code,
-from pool definitions to voxel-wise fitting. Tutorials 08 to 12 fit a measured seven-tube phantom
+[`examples/`](examples/) contains eleven tutorials. Tutorials 01 to 07 build everything in code,
+from pool definitions to voxel-wise fitting. Tutorials 08 to 11 fit a measured seven-tube phantom
 (QUESP and QUEST at 3 T) whose data ship in [`examples/data/`](examples/data/). An overview is given in
 [`examples/README.md`](examples/README.md).
 

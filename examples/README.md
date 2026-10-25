@@ -1,7 +1,7 @@
 # Tutorials
 
-Twelve scripts introduce BMC-JAX step by step. Each script runs on its own with the installed
-package. Tutorials 01 to 07 build all their inputs in code. Tutorials 08 to 12 fit a measured
+Eleven scripts introduce BMC-JAX step by step. Each script runs on its own with the installed
+package. Tutorials 01 to 07 build all their inputs in code. Tutorials 08 to 11 fit a measured
 phantom whose data are included in [`data/`](data/README.md).
 
 ```bash
@@ -25,7 +25,6 @@ python 01_pools.py
 | `09_quest.py` | The same tubes measured with six saturation times. QUESP against QUEST. |
 | `10_shared_water.py` | `fit_joint`: a water R2 factor, the start magnetisation and the B0 spread (`B0Spread`) shared by all seven tubes, fitted together with k, f and pool T2 of every pool tube. |
 | `11_per_rung.py` | One value per rung of the ladder, shared by the tubes: a B1 factor per saturation amplitude (`scope="block"`), and how to interpret it. |
-| `12_paper_phantom.py` | The phantom fits of the paper that describes BMC-JAX, with its recipe (two stages, QUESP and QUEST), printed next to the published values. |
 
 ## One saturation level and the QUESP ladder (04 and 05)
 
@@ -45,9 +44,9 @@ on k. The tutorial fits the same pool at five exchange rates with 0.2 % noise. T
 Tutorial 05 shows how a ladder of saturation amplitudes extends the range of exchange rates that can
 be measured, and where this range ends: the lowest amplitude sets the limit for slow exchange.
 
-## Measured phantom (08 to 12)
+## Measured phantom (08 to 11)
 
-Tutorials 08 to 12 use a seven-tube phantom measured at 3 T on 2026-09-27: one tube of
+Tutorials 08 to 11 use a seven-tube phantom measured at 3 T on 2026-09-27: one tube of
 phosphate-buffered saline and three pairs. The two GAG tubes (100 and 50 mg/mL) should give a ratio
 of fitted pool sizes of 2. The creatine and carnosine pairs, each one solution at two pH values,
 should give a ratio of 1. A ratio does not depend on the absolute concentration, so these checks are
@@ -60,7 +59,6 @@ Runtimes on one NVIDIA RTX 3070:
 
 | Tutorial | Runtime |
 |---|---|
-| 08, 09 | a few minutes, mostly compilation of sequences with several thousand events |
-| 10 | about 1.5 h (B0 spread with 15 isochromats per tube, 12 joint steps) |
+| 08, 09 | about 15 min each (60 fit steps on sequences with several thousand events) |
+| 10 | about 2 h (B0 spread with 15 isochromats per tube, 12 joint steps) |
 | 11 | about 3 h (two joint fits with the B0 spread) |
-| 12 | about 3.5 h (QUESP and QUEST, two stages each) |

@@ -17,7 +17,8 @@ mechanisms. Where they disagree, at least one experiment does not determine the 
 exchange, a single amplitude (QUEST) determines mainly the product k*f, not k and f separately, so
 the slow tubes are expected to differ.
 
-Requirements: the core package; the data ship in examples/data/.
+Requirements: the core package; the data ship in examples/data/. Runtime: about 15 minutes on one
+RTX 3070.
 
 Run:  python 09_quest.py
 """

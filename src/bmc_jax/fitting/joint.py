@@ -43,7 +43,6 @@ THREE RULES FOR A COUPLED FIT, all off by default (off = the arithmetic above, s
   keep_jacobian  after a rejected step the point has not moved, so its residual and Jacobian are reused
                  and only the trial point is evaluated again. The accepted points are the same; a rejected
                  step costs one model evaluation instead of a model evaluation and a Jacobian.
-The phantom fits of the paper that ships with this package used all three (examples/12_paper_phantom.py).
 
 `max_chunk` builds the Jacobian `max_chunk` samples per device call. It bounds memory, and it is the
 workaround for batched GPU Jacobians that came back NaN for some batch shapes (seen on an RTX 3070 with
