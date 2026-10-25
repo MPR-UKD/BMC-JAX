@@ -32,7 +32,7 @@ How to read the result
     per-rung B1 effect must also improve the PBS fit at the affected rungs. If only the tubes with a
     CEST pool improve, the factors compensate an error of the pool model and do not measure B1.
 
-Requirements: the core package; the data ship in examples/data/. Runtime: about 3 h on one
+Requirements: the core package; the data ship in examples/data/. Runtime: about 3.5 h on one
 RTX 3070 (two joint fits with 15 nodes).
 
 Run:  python 11_per_rung.py

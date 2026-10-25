@@ -61,4 +61,4 @@ Runtimes on one NVIDIA RTX 3070:
 |---|---|
 | 08, 09 | about 15 min each (60 fit steps on sequences with several thousand events) |
 | 10 | about 2 h (B0 spread with 15 isochromats per tube, 12 joint steps) |
-| 11 | about 3 h (two joint fits with the B0 spread) |
+| 11 | about 3.5 h (two joint fits with the B0 spread) |
