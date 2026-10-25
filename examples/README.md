@@ -1,8 +1,8 @@
 # Tutorials
 
-Eleven scripts introduce BMC-JAX step by step. Each script runs on its own with the installed
-package. Tutorials 01 to 07 build all their inputs in code. Tutorials 08 to 11 fit a measured
-phantom whose data are included in [`data/`](data/README.md).
+Twelve scripts introduce BMC-JAX step by step. Each script runs on its own with the installed
+package. Tutorials 01 to 07 and 12 build all their inputs in code. Tutorials 08 to 11 fit a
+measured phantom whose data are included in [`data/`](data/README.md).
 
 ```bash
 pip install -e ".[pulseq]"     # tutorial 03 needs pypulseq; all others need only the core package
@@ -17,7 +17,7 @@ python 01_pools.py
 | `01_pools.py` | Water, CEST and MT pools, defined in code and read from a Pulseq-CEST YAML configuration. Rates and times, validation, immutability. |
 | `02_simulate.py` | From pools to a Z-spectrum. MTRasym, and why it is not a clean measure of a single pool. `--plot` draws a figure (needs matplotlib). |
 | `03_seq_file.py` | Writing a Pulseq `.seq` file with pypulseq, reading it back, simulating it, and comparing it with the same sequence built in code. |
-| `04_fit_one.py` | Fitting k and f from a single saturation level, and the conditions under which this fails. |
+| `04_fit_one.py` | The Jacobian and how it is computed (forward mode, reverse mode, finite differences). Fitting k and f from a single saturation level, and the conditions under which this fails. |
 | `05_fit_ladder.py` | The QUESP ladder: `Experiment.stack`, the residual per rung, and `at_bounds`. |
 | `06_quest.py` | The QUEST ladder in saturation time. Sequences of different length, and QUESP against QUEST as a cross-check. |
 | `07_many_voxels.py` | A slice: per-voxel calibration held fixed, chunked memory use, and the cost of ignoring the maps. |
@@ -25,6 +25,7 @@ python 01_pools.py
 | `09_quest.py` | The same tubes measured with six saturation times. QUESP against QUEST. |
 | `10_shared_water.py` | `fit_joint`: a water R2 factor, the start magnetisation and the B0 spread (`B0Spread`) shared by all seven tubes, fitted together with k, f and pool T2 of every pool tube. |
 | `11_per_rung.py` | One value per rung of the ladder, shared by the tubes: a B1 factor per saturation amplitude (`scope="block"`), and how to interpret it. |
+| `12_crlb.py` | The Jacobian, the Fisher information and the Cramer-Rao lower bound: the smallest uncertainty a protocol allows, checked with 200 Monte Carlo fits and used to compare protocols. |
 
 ## One saturation level and the QUESP ladder (04 and 05)
 

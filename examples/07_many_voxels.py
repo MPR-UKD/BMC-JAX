@@ -135,4 +135,4 @@ For several GPUs, fit_batch_sharded splits the same batch across all local devic
 Summary of tutorials 01 to 07: defining a model (01), simulating a spectrum (02), simulating a
 Pulseq file (03), fitting from one saturation level and its limits (04), the QUESP ladder (05),
 the QUEST ladder (06) and fitting many voxels (07). Tutorials 08 to 11 apply these steps to a
-measured phantom.""")
+measured phantom, and tutorial 12 computes the smallest uncertainty a protocol allows.""")

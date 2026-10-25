@@ -7,6 +7,9 @@ New:
   held at an active bound, and reuse of the Jacobian after a rejected step, for coupled fits. Off by
   default; the default path is unchanged.
 - Automatic tests on every push and once a week (GitHub Actions).
+- Tutorial 12 (`examples/12_crlb.py`): the Jacobian, the Fisher information and the Cramer-Rao lower
+  bound, checked with Monte Carlo fits and used to compare protocols.
+- Tutorial 04 explains the Jacobian and compares forward mode, reverse mode and finite differences.
 
 Fixed:
 - PyYAML is now a dependency. Reading a model configuration (`example_config`, `from_yaml`) needs it,
