@@ -2,7 +2,7 @@
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 112 tests, the docstring examples included
+pytest                    # 116 tests, the docstring examples included
 ```
 
 | file | checks |

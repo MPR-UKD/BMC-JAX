@@ -33,6 +33,18 @@ clipped to the bounds). Without a shared or per-block value the problem is block
 gets its own damping: that IS `fit`'s algorithm, and with a plain spec the two give the same numbers. With
 one, the samples are coupled and one damping governs the joint step.
 
+THREE RULES FOR A COUPLED FIT, all off by default (off = the arithmetic above, step for step):
+  stop_lam       stop once the damping exceeds this value: no step, however small, lowers the cost any
+                 more, so further steps only raise the damping. `n_iter` becomes the maximum.
+  active_bounds  a value that sits on its bound and whose step would leave the box is held for that step:
+                 its row and column leave the solve. Without it the step is computed as if the value could
+                 move, and the clip then refuses that part, so the other values get a step that was meant
+                 for a different point.
+  keep_jacobian  after a rejected step the point has not moved, so its residual and Jacobian are reused
+                 and only the trial point is evaluated again. The accepted points are the same; a rejected
+                 step costs one model evaluation instead of a model evaluation and a Jacobian.
+The phantom fits of the paper that ships with this package used all three (examples/12_paper_phantom.py).
+
 `max_chunk` builds the Jacobian `max_chunk` samples per device call. It bounds memory, and it is the
 workaround for batched GPU Jacobians that came back NaN for some batch shapes (seen on an RTX 3070 with
 jax 0.6.2 and 0.7.2). In a coupled fit a step whose Jacobian has NaN or inf is rejected and counted.
@@ -135,8 +147,25 @@ def _cov_to_sd_corr(cov, scale):
     return sd * scale, corr
 
 
+def _lm_trial(x, lam, J, r, lo, hi, active_bounds=False):
+    """The trial point of one damped Gauss-Newton step, clipped to the bounds (scaled units).
+
+    With `active_bounds`, a value on its bound whose step points out of the box is held for this step:
+    its row and column of the normal equations are replaced by the identity and its gradient by 0, so
+    the other values get the step of the problem without it.
+    """
+    g, H = J.T @ r, J.T @ J
+    eye = jnp.eye(x.shape[0], dtype=x.dtype)
+    if active_bounds:
+        keep = jnp.where(((x <= lo) & (g > 0)) | ((x >= hi) & (g < 0)), 0.0, 1.0).astype(x.dtype)
+        H = H * keep[:, None] * keep[None, :] + jnp.diag(1.0 - keep)
+        g = g * keep
+    return jnp.clip(x + jnp.linalg.solve(H + lam * (jnp.diag(jnp.diag(H)) + 1e-9 * eye), -g), lo, hi)
+
+
 def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=None, max_chunk=None,
-              lam0=1e-2, callback=None, spread=None, block_jacobian="full", _internals=False):
+              lam0=1e-2, callback=None, spread=None, block_jacobian="full", stop_lam=None,
+              active_bounds=False, keep_jacobian=False, _internals=False):
     """Fit `spec`'s parameters of every sample at once: shared, per-block and partly free values allowed.
 
     Parameters
@@ -149,7 +178,7 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
     z_meas
         Measured Z-spectra, shape (n_samples, n_offsets).
     n_iter
-        Levenberg-Marquardt steps (all of them run; there is no convergence test).
+        Levenberg-Marquardt steps. All of them run, unless `stop_lam` ends the fit earlier.
     x0_phys
         Starting values, physical units, shape (n_samples, n_parameters); default each slot's `x0`. A
         shared or per-block value starts at the entry of the first sample it is free in (every block
@@ -170,6 +199,15 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
         "full" (default): one forward tangent per block of a per-block slot, as before. "split": one per
         slot, split into its blocks' rows afterwards -- cheaper by the number of blocks, the same derivative
         up to rounding (see the module notes).
+    stop_lam
+        Coupled fits: stop once the damping exceeds this value (no step lowers the cost any more). None
+        (default): run all `n_iter` steps.
+    active_bounds
+        Coupled fits: hold a value that sits on its bound for every step that would move it out of the box
+        (see the module notes). False (default): the step is only clipped.
+    keep_jacobian
+        Coupled fits: reuse the residual and Jacobian after a rejected step (the point has not moved).
+        The same accepted points, fewer Jacobians. False (default): a new Jacobian every step.
     _internals
         Tests only: return the residual, the Jacobian and the start instead of fitting.
 
@@ -315,6 +353,9 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
         return dict(resid=resid_all, jac=jac_all, x0=x_start, cols=cols, model=model, locs=locs)
 
     coupled = any(s.scope in ("shared", "block") for s in spec.slots)
+    if not coupled and (stop_lam is not None or active_bounds or keep_jacobian):
+        raise ValueError("stop_lam, active_bounds and keep_jacobian apply to a coupled fit (a shared or "
+                         "per-block value); without one every sample has its own damping, as in `fit`")
     nan_steps = 0
     if not coupled:
         # block diagonal: every sample alone, with its own damping -- fit's algorithm
@@ -338,33 +379,40 @@ def fit_joint(experiment, spec, z_meas, n_iter=30, x0_phys=None, n_per_block=Non
         col_scale = scales[col_slot]
         lo = jnp.asarray(spec.lo_phys[col_slot] / col_scale, dt)
         hi = jnp.asarray(spec.hi_phys[col_slot] / col_scale, dt)
-        eye = jnp.eye(P, dtype=dt)
 
         resid, jac = resid_all, jac_all
 
         @jax.jit
         def step(x, lam, J, r):
             c = r @ r
-            g, H = J.T @ r, J.T @ J
-            xn = jnp.clip(x + jnp.linalg.solve(H + lam * (jnp.diag(jnp.diag(H)) + 1e-9 * eye), -g), lo, hi)
+            xn = _lm_trial(x, lam, J, r, lo, hi, active_bounds)
             cn = jnp.sum(resid(xn) ** 2)
             better = cn < c
-            return jnp.where(better, xn, x), jnp.where(better, lam * 0.5, lam * 3.0), jnp.where(better, cn, c)
+            return (jnp.where(better, xn, x), jnp.where(better, lam * 0.5, lam * 3.0), jnp.where(better, cn, c),
+                    better)
 
         resid_j = jax.jit(resid)
         x = jnp.asarray([X0[who[0], l] / scales[l] for l, who, _ in cols], dt)
         lam, cost = jnp.asarray(lam0, dt), []
+        kept = None                                    # (r, J) of the current point after a rejected step
         for it in range(n_iter):
-            r, J = resid_j(x), jac(x)
-            if bool(jnp.all(jnp.isfinite(J))):
-                x, lam, c = step(x, lam, J, r)
+            if kept is None:
+                r, J = resid_j(x), jac(x)
+                finite = bool(jnp.all(jnp.isfinite(J)))
+            else:
+                (r, J), finite = kept, True
+            if finite:
+                x, lam, c, better = step(x, lam, J, r)
                 cost.append(float(c))
+                kept = (r, J) if keep_jacobian and not bool(better) else None
             else:                                      # a NaN Jacobian: reject, damp harder, count it
                 nan_steps += 1
                 lam = lam * 3.0
                 cost.append(float(r @ r))
             if callback is not None:
                 callback(it, cost[-1])
+            if stop_lam is not None and float(lam) > stop_lam:
+                break
         loc = locs(x)
         cost = np.asarray(cost)
 

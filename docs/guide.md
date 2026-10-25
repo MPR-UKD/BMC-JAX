@@ -51,6 +51,19 @@ and scaled by the misfit. For a specification without shared or partial paramete
 returns the same values as `fit`. `fit` rejects a specification it cannot honour instead of ignoring
 `scope` or `samples`.
 
+### Stopping rule, bounds and Jacobian reuse
+
+Three options of `fit_joint` change how a coupled fit (with a shared or per-block parameter) steps.
+All three are off by default, and the fit then runs exactly as described above.
+
+| Option | Effect |
+|---|---|
+| `stop_lam` | The fit stops once the damping exceeds this value. A damping that keeps growing means that no step, however small, lowers the cost any more, so further steps only cost time. `n_iter` becomes the maximum number of steps. |
+| `active_bounds` | A parameter that sits on its bound and whose step would move it out of the bounds is held for that step: its row and column leave the solve, and the other parameters get the step of the problem without it. Without this option, the step is computed as if the parameter could move, and the clip at the bound then refuses that part. |
+| `keep_jacobian` | After a rejected step the point has not moved, so its residual and Jacobian are reused. The accepted points are the same, and a rejected step costs one model evaluation instead of a model evaluation and a Jacobian. |
+
+The phantom fits of `examples/12_paper_phantom.py` use all three, with `stop_lam=1e7`.
+
 ## B0 spread inside a sample
 
 `simulate_spectrum` follows a single isochromat. A real voxel or tube contains spins a few Hz apart,

@@ -95,6 +95,56 @@ def test_a_shared_value_is_recovered(amide):
     assert res.cost[-1] < res.cost[0] and res.nan_steps == 0
 
 
+def _shared_r2(amide, **kw):
+    """The shared-R2 fit of the test above, with extra fit_joint arguments."""
+    p, jp, true, events, m0, z = amide
+    start = true._replace(water_r2=jnp.full(3, 14.0, true.water_r1.dtype))
+    return fit_joint(Experiment(start, events, m0, p.mz_loc), FitSpec([K, F, R2W]), z, **kw)
+
+
+def test_keeping_the_jacobian_changes_no_point(amide):
+    """After a rejected step the point has not moved: reusing its Jacobian gives the same fit."""
+    a, b = _shared_r2(amide, n_iter=40), _shared_r2(amide, n_iter=40, keep_jacobian=True)
+    np.testing.assert_allclose(b.x, a.x, rtol=1e-6)
+    np.testing.assert_allclose(b.cost, a.cost, rtol=1e-6)
+
+
+def test_stop_lam_ends_the_fit_and_changes_no_step(amide):
+    """The fit stops once the damping exceeds stop_lam, and its steps are those of the fit without it."""
+    stopped = _shared_r2(amide, n_iter=100, stop_lam=1e3)
+    assert len(stopped.cost) < 100, "noise-free data: every step is rejected once converged"
+    same = _shared_r2(amide, n_iter=len(stopped.cost))
+    np.testing.assert_allclose(stopped.x, same.x, rtol=1e-6)
+
+
+def test_active_bounds_hold_a_value_that_would_leave():
+    """A value on its lower bound with an outward step is held; the others get the reduced problem's step."""
+    from bmc_jax.fitting.joint import _lm_trial
+    rng = np.random.default_rng(1)
+    J = rng.normal(size=(30, 3)).astype(np.float32)
+    r = rng.normal(size=30).astype(np.float32)
+    if (J.T @ r)[0] < 0:                               # make the gradient of value 0 push it below its bound
+        J[:, 0] *= -1
+    x = np.array([0.0, 0.5, 0.5], np.float32)
+    lo, hi = np.zeros(3, np.float32), np.ones(3, np.float32) * 10
+    lam = np.float32(0.1)
+    held = np.asarray(_lm_trial(x, lam, J, r, lo, hi, active_bounds=True))
+    Jr = J[:, 1:]
+    H, g = Jr.T @ Jr, Jr.T @ r
+    want = x[1:] + np.linalg.solve(H + lam * (np.diag(np.diag(H)) + 1e-9 * np.eye(2)), -g)
+    assert held[0] == 0.0
+    np.testing.assert_allclose(held[1:], want, rtol=1e-4)
+    clipped = np.asarray(_lm_trial(x, lam, J, r, lo, hi))
+    assert clipped[0] == 0.0 and not np.allclose(clipped[1:], want, rtol=1e-4), "the clip alone gives another step"
+
+
+def test_the_lm_rules_need_a_coupled_fit(amide):
+    p, jp, true, events, m0, z = amide
+    for kw in (dict(stop_lam=1e7), dict(active_bounds=True), dict(keep_jacobian=True)):
+        with pytest.raises(ValueError, match="coupled"):
+            fit_joint(Experiment(true, events, m0, p.mz_loc), FitSpec([K, F]), z, n_iter=1, **kw)
+
+
 def test_a_shared_value_survives_a_chunked_jacobian(amide):
     """One sample per device call (the NaN-Jacobian workaround) still finds the same truth."""
     p, jp, true, events, m0, z = amide

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+New:
+- `fit_joint(stop_lam=, active_bounds=, keep_jacobian=)`: a stopping rule on the damping, parameters
+  held at an active bound, and reuse of the Jacobian after a rejected step, for coupled fits. Off by
+  default; the default path is unchanged.
+- Tutorial 12 (`examples/12_paper_phantom.py`): the phantom fits of the paper, printed next to the
+  published values.
+- Automatic tests on every push and once a week (GitHub Actions).
+
+Fixed:
+- PyYAML is now a dependency. Reading a model configuration (`example_config`, `from_yaml`) needs it,
+  and a clean install without it failed.
+- `bmc_jax.sequences.pulseq` no longer needs pypulseq to be imported; pypulseq is only needed to read
+  or write a `.seq` file.
+
+Changed:
+- The tutorials, the tutorial overview and the user guide were rewritten in a neutral, explanatory
+  style.
+
 ## 0.2.0 (2026-10-18)
 
 The package is reorganised into `simulation/`, `sequences/`, `fitting/`, `mrf/` and `settings.py`.
