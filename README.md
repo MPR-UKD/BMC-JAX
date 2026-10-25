@@ -123,19 +123,30 @@ GPUs, and remains differentiable at every level.
 
 ## Tutorials
 
-[`examples/`](examples/) contains thirteen tutorials. Tutorials 01 to 07 build everything in code,
-from pool definitions to voxel-wise fitting. Tutorial 12 computes the Cramer-Rao lower bound of a
-protocol, and tutorial 13 optimises a protocol. Tutorials 08 to 11 fit a measured seven-tube phantom
-(QUESP and QUEST at 3 T) whose data ship in [`examples/data/`](examples/data/). An overview is given in
-[`examples/README.md`](examples/README.md).
+The [`examples/`](examples/) folder contains thirteen tutorials, meant to be read in order. Each script
+runs on its own and prints an explanation together with its results.
+
+| Tutorials | Topic |
+|---|---|
+| 01 to 03 | Basics: defining a model, simulating a Z-spectrum, simulating a Pulseq `.seq` file |
+| 04 to 07 | Fitting simulated data: the Jacobian and automatic differentiation, fitting from one saturation level, the QUESP and QUEST ladders, many voxels at once |
+| 08 to 11 | Fitting a measured seven-tube phantom (QUESP and QUEST at 3 T): each tube alone, water parameters shared by all tubes, one parameter per saturation amplitude. The data ship in [`examples/data/`](examples/data/). |
+| 12 and 13 | Protocol design: the Cramer-Rao lower bound of a protocol, and a protocol optimised to lower it |
+
+Tutorials 01 to 07, 12 and 13 run in seconds to a few minutes. Tutorials 08 to 11 take between 15
+minutes and 3.5 hours on one GPU. [`examples/README.md`](examples/README.md) describes every tutorial
+and lists the runtimes.
 
 ## Documentation
 
-- [`docs/guide.md`](docs/guide.md): joint fits, the B0 spread, the matrix exponential, and the
-  conditions under which a fitted exchange rate is reliable.
-- [`CHANGELOG.md`](CHANGELOG.md): changes between versions, including the renamed functions for code
-  written for 0.1.0.
-- [`tests/README.md`](tests/README.md): what the test suite checks.
+- [`docs/guide.md`](docs/guide.md): user guide. Joint fits with shared parameters, the stopping and
+  bound rules of `fit_joint`, the B0 spread within a sample, the choice of matrix exponential, the
+  Cramer-Rao bound and protocol design, and the conditions under which a fitted exchange rate is
+  reliable.
+- [`examples/README.md`](examples/README.md): overview of the tutorials, with runtimes.
+- [`CHANGELOG.md`](CHANGELOG.md): changes between versions, including a table of renamed functions
+  for code written for 0.1.0.
+- [`tests/README.md`](tests/README.md): what the test suite checks and how to run it.
 
 ## Testing
 
