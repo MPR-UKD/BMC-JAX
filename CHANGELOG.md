@@ -7,8 +7,11 @@ New:
   held at an active bound, and reuse of the Jacobian after a rejected step, for coupled fits. Off by
   default; the default path is unchanged.
 - Automatic tests on every push and once a week (GitHub Actions).
+- `bmc_jax.design`: `crlb` (the Cramer-Rao lower bound of a protocol) and `optimize_design` (a protocol
+  with a lower bound, by gradient descent through the simulation).
 - Tutorial 12 (`examples/12_crlb.py`): the Jacobian, the Fisher information and the Cramer-Rao lower
   bound, checked with Monte Carlo fits and used to compare protocols.
+- Tutorial 13 (`examples/13_optimise_protocol.py`): optimising the amplitudes of a QUESP ladder.
 - Tutorial 04 explains the Jacobian and compares forward mode, reverse mode and finite differences.
 
 Fixed:

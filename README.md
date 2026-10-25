@@ -116,15 +116,16 @@ GPUs, and remains differentiable at every level.
 | `bmc_jax.simulation` | forward model: system matrix, time step, Z-spectrum, voxel batches, B0 spread, multi-GPU |
 | `bmc_jax.sequences` | saturation sequences built in code or read from Pulseq `.seq` files |
 | `bmc_jax.fitting` | `fit` and `fit_joint`, parameter specifications, Levenberg-Marquardt |
+| `bmc_jax.design` | Cramer-Rao lower bound of a protocol (`crlb`) and protocol optimisation (`optimize_design`) |
 | `bmc_jax.io` | Pulseq-CEST YAML configurations and example models |
 | `bmc_jax.mrf` | MR fingerprinting dictionaries |
 | `bmc_jax.settings` | float32 or float64, and the choice of matrix exponential |
 
 ## Tutorials
 
-[`examples/`](examples/) contains twelve tutorials. Tutorials 01 to 07 build everything in code,
-from pool definitions to voxel-wise fitting, and tutorial 12 computes the Cramer-Rao lower bound of a
-protocol. Tutorials 08 to 11 fit a measured seven-tube phantom
+[`examples/`](examples/) contains thirteen tutorials. Tutorials 01 to 07 build everything in code,
+from pool definitions to voxel-wise fitting. Tutorial 12 computes the Cramer-Rao lower bound of a
+protocol, and tutorial 13 optimises a protocol. Tutorials 08 to 11 fit a measured seven-tube phantom
 (QUESP and QUEST at 3 T) whose data ship in [`examples/data/`](examples/data/). An overview is given in
 [`examples/README.md`](examples/README.md).
 

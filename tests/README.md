@@ -2,7 +2,7 @@
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 116 tests, the docstring examples included
+pytest                    # 123 tests, the docstring examples included
 ```
 
 | file | checks |
@@ -12,6 +12,7 @@ pytest                    # 116 tests, the docstring examples included
 | `test_fitting.py` | simulate, then fit the parameters back |
 | `test_joint.py` | the same with shared values and a pool in some samples only; a plain spec gives `fit`'s numbers; the B0 spread; the assembled Jacobian against `jax.jacfwd` for every kind of value |
 | `test_config.py` | reading a Pulseq-CEST config |
+| `test_design.py` | the Cramer-Rao bound (scaling with the noise and with the amount of data) and protocol optimisation |
 | `test_structure.py` | the package's own layering rules |
 
 `test_solver.py` checks what is true of any correct Bloch–McConnell implementation: the far wing

@@ -1,7 +1,7 @@
 # Tutorials
 
-Twelve scripts introduce BMC-JAX step by step. Each script runs on its own with the installed
-package. Tutorials 01 to 07 and 12 build all their inputs in code. Tutorials 08 to 11 fit a
+Thirteen scripts introduce BMC-JAX step by step. Each script runs on its own with the installed
+package. Tutorials 01 to 07, 12 and 13 build all their inputs in code. Tutorials 08 to 11 fit a
 measured phantom whose data are included in [`data/`](data/README.md).
 
 ```bash
@@ -26,6 +26,7 @@ python 01_pools.py
 | `10_shared_water.py` | `fit_joint`: a water R2 factor, the start magnetisation and the B0 spread (`B0Spread`) shared by all seven tubes, fitted together with k, f and pool T2 of every pool tube. |
 | `11_per_rung.py` | One value per rung of the ladder, shared by the tubes: a B1 factor per saturation amplitude (`scope="block"`), and how to interpret it. |
 | `12_crlb.py` | The Jacobian, the Fisher information and the Cramer-Rao lower bound: the smallest uncertainty a protocol allows, checked with 200 Monte Carlo fits and used to compare protocols. |
+| `13_optimise_protocol.py` | Optimising a protocol: the amplitudes of a four-rung QUESP ladder chosen by gradient descent to lower the bound, at fixed scan time (`bmc_jax.design.optimize_design`). |
 
 ## One saturation level and the QUESP ladder (04 and 05)
 

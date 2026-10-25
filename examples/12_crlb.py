@@ -51,6 +51,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from bmc_jax.design import crlb
 from bmc_jax.fitting import Experiment, FitSpec, FreeParam, fit
 from bmc_jax.io import example_config
 from bmc_jax.sequences import cw_saturation
@@ -82,7 +83,7 @@ def model(events):
     return z_of
 
 
-def crlb(events, k, f=F_TRUE, sigma=NOISE):
+def bound(events, k, f=F_TRUE, sigma=NOISE):
     """Jacobian, Fisher matrix, CRLB (SD of k and f) and the k-f correlation at the true values (k, f)."""
     J = jax.jacfwd(model(events))(jnp.array([k, f]))
     fisher = J.T @ J / sigma ** 2
@@ -116,7 +117,7 @@ print("   differentiation needs no step and is exact to rounding.\n")
 # ---------------------------------------------------------------------------------------------
 # 2. Fisher information and the Cramer-Rao lower bound
 # ---------------------------------------------------------------------------------------------
-_, fisher, sd, corr = crlb(ladder, K_TRUE)
+_, fisher, sd, corr = bound(ladder, K_TRUE)
 print(f"2. Fisher information F = J^T J / sigma^2 with sigma = {NOISE:g}:")
 print(f"     [[{fisher[0, 0]:10.4g}  {fisher[0, 1]:10.4g}]")
 print(f"      [{fisher[1, 0]:10.4g}  {fisher[1, 1]:10.4g}]]")
@@ -125,7 +126,15 @@ print(f"     k: {K_TRUE:g} +- {sd[0]:.2f} 1/s   ({100 * sd[0] / K_TRUE:.1f} %)")
 print(f"     f: {F_TRUE:.5f} +- {sd[1]:.5f}   ({100 * sd[1] / F_TRUE:.1f} %)")
 print(f"   correlation of the k and f estimates: {corr:+.3f}")
 print("   A correlation close to -1 means that a higher k and a lower f give almost the same spectrum. The")
-print("   bound includes this: each parameter alone would be known far better if the other were fixed.\n")
+print("   bound includes this: each parameter alone would be known far better if the other were fixed.")
+
+# The package function does the same: bmc_jax.design.crlb(experiment, spec, sigma, x).
+spec = FitSpec([FreeParam("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=K_TRUE),
+                FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=F_TRUE)])
+b = crlb(Experiment(jax_params, ladder, m0, params.mz_loc), spec, NOISE, x=[K_TRUE, F_TRUE])
+print("   The same with the package function bmc_jax.design.crlb:")
+print("   " + b.summary().replace("\n", "\n   "))
+print(f"   correlation {b.corr[0, 1]:+.3f}\n")
 
 # ---------------------------------------------------------------------------------------------
 # 3. Monte Carlo check: does a real fit reach the bound?
@@ -136,8 +145,6 @@ print("   bound includes this: each parameter alone would be known far better if
 N = 200
 z_true = np.asarray(z_of(theta))
 Z = z_true + np.random.default_rng(0).normal(0.0, NOISE, (N, z_true.size))
-spec = FitSpec([FreeParam("k", "cest_k", 0, scale=100.0, lo=5.0, hi=20000.0, x0=K_TRUE),
-                FreeParam("f", "cest_f", 0, scale=0.001, lo=1e-6, hi=0.05, x0=F_TRUE)])
 res = fit(Experiment(jax_params, ladder, m0, params.mz_loc), spec, Z, n_iter=40, n_per_block=len(ppm))
 k_fit, f_fit = res["k"], res["f"]
 mc_corr = np.corrcoef(k_fit, f_fit)[0, 1]
@@ -162,9 +169,9 @@ for k in (50.0, 500.0):
     for b in LADDER:
         w1 = gamma * b
         alpha = w1 ** 2 / (w1 ** 2 + k * (k + R2S))
-        _, _, s, c = crlb(events_for((b,)), k)
+        _, _, s, c = bound(events_for((b,)), k)
         print(f"     {f'{b:g} uT':<16} {alpha:>7.3f} {100 * s[0] / k:>8.1f}% {100 * s[1] / F_TRUE:>8.1f}% {c:>+7.3f}")
-    _, _, s, c = crlb(ladder, k)
+    _, _, s, c = bound(ladder, k)
     print(f"     {'ladder (all 5)':<16} {'':>7} {100 * s[0] / k:>8.1f}% {100 * s[1] / F_TRUE:>8.1f}% {c:>+7.3f}")
 print("""   Where alpha is close to 1 (the pool is already saturated), a single amplitude gives a large bound and
    a correlation near -1: k and f cannot be separated. Where alpha is small, the bound grows as well,

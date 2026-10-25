@@ -47,6 +47,8 @@ ALLOWED = {
     "fitting.independent": {"simulation", "fitting.params", "fitting.residual",
                             "fitting.lm", "fitting.experiment", "fitting.result"},
     "fitting.joint":    {"simulation", "fitting.lm", "fitting.result"},
+    "design.crlb":      {"simulation", "fitting.params"},
+    "design.optimize":  {"design.crlb"},
 }
 
 
@@ -109,24 +111,26 @@ def test_no_environment_variables_anywhere_in_the_package():
 
 def test_public_api_has_no_private_names():
     """__all__ is the contract. A leading underscore in it means the boundary is wrong."""
+    import bmc_jax.design as D
     import bmc_jax.fitting as F
     import bmc_jax.io as IO
     import bmc_jax.mrf as M
     import bmc_jax.sequences as Q
     import bmc_jax.simulation as S
-    for mod in (F, IO, S, Q, M):
+    for mod in (F, IO, S, Q, M, D):
         assert hasattr(mod, "__all__"), f"{mod.__name__} has no __all__"
         bad = [n for n in mod.__all__ if n.startswith("_")]
         assert bad == [], f"{mod.__name__}.__all__ exports private names: {bad}"
 
 
 def test_every_exported_name_exists():
+    import bmc_jax.design as D
     import bmc_jax.fitting as F
     import bmc_jax.io as IO
     import bmc_jax.mrf as M
     import bmc_jax.sequences as Q
     import bmc_jax.simulation as S
-    for mod in (F, IO, S, Q, M):
+    for mod in (F, IO, S, Q, M, D):
         missing = [n for n in mod.__all__ if not hasattr(mod, n)]
         assert missing == [], f"{mod.__name__}.__all__ promises {missing}, which do not exist"
 

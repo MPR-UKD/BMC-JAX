@@ -89,6 +89,24 @@ Both give the same result up to float32 rounding. The `"plain"` option exists be
 batch shapes, the library calls inside `expm` returned NaN or incorrect derivatives in a vmapped
 Jacobian, while the residual itself was correct. Details are given in `simulation/expm.py`.
 
+## Precision of a protocol and protocol design
+
+`bmc_jax.design.crlb(experiment, spec, sigma, x)` computes the Cramer-Rao lower bound: the smallest
+standard deviation that any unbiased estimate of the parameters in `spec` can have, for the protocol in
+`experiment`, noise `sigma` on every point and true values `x`. It uses the Fisher information
+`F = J^T J / sigma^2` with the Jacobian of the same model that `fit` inverts. The result holds the bound
+(`sd`, `rel_sd`), the correlation matrix and the Fisher matrix, and `summary()` prints a table.
+
+`bmc_jax.design.optimize_design(build, spec, d0, lo, hi, sigma, truths)` changes a protocol vector `d`
+(for example the amplitudes of a ladder) to lower the mean squared relative bound over the true values
+in `truths`. `build(d)` must return an Experiment and use JAX operations only, so that the bound can be
+differentiated with respect to `d`. Keep the scan time fixed inside `build`, and express hardware limits
+through `lo` and `hi`.
+
+Compute bounds in float64 (`bmc_jax.settings.use_x64(True)`): the Fisher matrix of an exchange rate and
+a pool size is close to singular. The bound describes noise only; it does not include model or
+calibration errors. Tutorials 12 and 13 show both functions.
+
 ## Limits of a fitted exchange rate
 
 **An exchange rate fitted from one saturation level is not always a measurement of k.** The
