@@ -58,7 +58,7 @@ def module_path(dotted: str) -> Path:
 
 def internal_imports(path: Path) -> set[str]:
     """Every bmc_jax module this file imports, as dotted names relative to the package."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     out = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.level:           # from .x / from ..x import
@@ -83,7 +83,7 @@ def test_import_layering(dotted):
 
 def test_lm_does_not_import_the_simulation():
     """The optimiser must be usable without any of the physics. This is the whole point."""
-    src = module_path("fitting.lm").read_text()
+    src = module_path("fitting.lm").read_text(encoding="utf-8")
     assert "simulation" not in src and "jax_solver" not in src, "lm.py reached for the solver; the split is cosmetic"
     assert internal_imports(module_path("fitting.lm")) == set()
 
@@ -99,7 +99,7 @@ def test_no_environment_variables_anywhere_in_the_package():
     """
     offenders = []
     for path in sorted(SRC.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             # os.environ[...] / os.environ.get(...) / os.getenv(...)
             hit = (isinstance(node, ast.Attribute)
                    and node.attr in ("environ", "getenv")

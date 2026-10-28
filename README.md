@@ -29,7 +29,8 @@ and the Jacobian of the fit is obtained by automatic differentiation of the solv
 
 ## Installation
 
-Requirements: Python 3.10 or later, NumPy, PyYAML and JAX 0.6 or later.
+Requirements: Python 3.10 or later, NumPy, PyYAML and JAX 0.6 or later. BMC-JAX runs on Linux and
+Windows, and the tests run on both on every push.
 
 ```bash
 git clone https://github.com/MPR-UKD/BMC-JAX.git
@@ -37,9 +38,13 @@ cd BMC-JAX
 pip install -e .
 ```
 
+The same commands work in PowerShell on Windows.
+
 For GPU execution, install JAX with CUDA support as described in the
 [JAX installation guide](https://docs.jax.dev/en/latest/installation.html), for example
-`pip install -U "jax[cuda12]"`.
+`pip install -U "jax[cuda12]"`. JAX has CUDA support on Linux only. On Windows it runs on the CPU;
+for a GPU on a Windows computer, install BMC-JAX inside WSL2 (Windows Subsystem for Linux), where the
+Linux commands above work unchanged.
 
 Optional extras, installed with `pip install -e ".[extra]"`:
 

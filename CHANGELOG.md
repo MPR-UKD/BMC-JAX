@@ -6,7 +6,8 @@ New:
 - `fit_joint(stop_lam=, active_bounds=, keep_jacobian=)`: a stopping rule on the damping, parameters
   held at an active bound, and reuse of the Jacobian after a rejected step, for coupled fits. Off by
   default; the default path is unchanged.
-- Automatic tests on every push and once a week (GitHub Actions).
+- Automatic tests on every push and once a week (GitHub Actions), on Ubuntu and Windows.
+- Windows support. On Windows JAX runs on the CPU; for a GPU use Linux or WSL2 (see the README).
 - `bmc_jax.design`: `crlb` (the Cramer-Rao lower bound of a protocol) and `optimize_design` (a protocol
   with a lower bound, by gradient descent through the simulation).
 - Tutorial 12 (`examples/12_crlb.py`): the Jacobian, the Fisher information and the Cramer-Rao lower
@@ -21,6 +22,10 @@ Fixed:
   or write a `.seq` file.
 - Tutorials 08 to 11 use the plain matrix exponential. With the library version the batched Jacobian
   came back NaN on an RTX 3070, every step was rejected, and the fits ended at their start values.
+- Model configurations are read as UTF-8. Windows reads text in its own code page by default, so a
+  YAML file with a character like µ or ° would have been misread there.
+- The `.seq` files keep their line endings on Windows (`.gitattributes`), so they stay byte for byte
+  what the scanner played.
 
 Changed:
 - The tutorials, the tutorial overview and the user guide were rewritten in a neutral, explanatory

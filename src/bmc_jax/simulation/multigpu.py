@@ -15,7 +15,8 @@ size. That is the property the pmap version lacked.
 Result is bit-for-bit what `vmapped_fn(*batched)` produces on a single device -- sharding only
 partitions an already-independent vmap, and the padding rows added to make the axis divisible by
 n_dev are dropped again. Verify with `benchmark_sharding.py --validate`
-(or on a GPU-less box: `XLA_FLAGS=--xla_force_host_platform_device_count=4 ... --validate`).
+(or on a GPU-less box: `XLA_FLAGS=--xla_force_host_platform_device_count=4 ... --validate`;
+in Windows PowerShell set it first with `$env:XLA_FLAGS = "--xla_force_host_platform_device_count=4"`).
 """
 import jax
 import jax.numpy as jnp

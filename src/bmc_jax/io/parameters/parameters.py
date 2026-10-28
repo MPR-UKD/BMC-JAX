@@ -125,5 +125,5 @@ class Parameters:
         """
         import yaml
 
-        with Path(path).open() as handle:
+        with Path(path).open(encoding="utf-8") as handle:
             return cls.from_dict(yaml.safe_load(handle))

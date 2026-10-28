@@ -1,0 +1,3 @@
+# Pulseq sequences are kept byte for byte as they were played: no line-ending conversion on
+# Windows, so the file still matches the hash in its [SIGNATURE] section.
+*.seq -text
